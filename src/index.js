@@ -17,8 +17,10 @@
   const testOut = document.getElementById("testOut");
 
   // State
-  let points = []; // world coords: origin at canvas center, +Y up
-  let selectedSet = new Set();
+  let points = []; // node array, each entry is {id,x,y,mirrorId,primary}
+  let nodeIdCounter = 1;
+  const idToIndex = new Map();
+  let selectedIds = new Set();
   let hoverIdx = -1;
   let dragging = false;
   let dragMode = null; // 'move' | 'pan' | 'box'
@@ -32,6 +34,194 @@
   let weightEnabled = false; // weighted follow
   let perHopFalloff = 0.5; // 0..1
   let maxHops = 3;
+  const EPS = 1e-6;
+  let suppressHistory = false;
+  const history = createHistoryManager();
+  let moveHistoryActive = false;
+  let moveApplied = false;
+  let activeDragCanonical = -1;
+  let activeDragIsMirror = false;
+
+  function createNode(x, y, opts = {}) {
+    return {
+      id: nodeIdCounter++,
+      x,
+      y,
+      mirrorId: opts.mirrorId ?? null,
+      primary: opts.primary ?? true,
+    };
+  }
+
+  function cloneNode(node) {
+    return {
+      id: node.id,
+      x: node.x,
+      y: node.y,
+      mirrorId: node.mirrorId,
+      primary: node.primary,
+    };
+  }
+
+  function rebuildIndex() {
+    idToIndex.clear();
+    points.forEach((node, idx) => {
+      idToIndex.set(node.id, idx);
+    });
+  }
+
+  function indexOfNodeId(id) {
+    if (id == null) return -1;
+    return idToIndex.has(id) ? idToIndex.get(id) : -1;
+  }
+
+  function linkMirrorPair(primaryIdx, mirrorIdx) {
+    if (primaryIdx < 0 || mirrorIdx < 0) return;
+    const primary = points[primaryIdx];
+    const mirror = points[mirrorIdx];
+    if (!primary || !mirror) return;
+    primary.mirrorId = mirror.id;
+    mirror.mirrorId = primary.id;
+    mirror.primary = false;
+    primary.primary = true;
+  }
+
+  function unlinkMirror(idx) {
+    const node = points[idx];
+    if (!node || node.mirrorId == null) return;
+    const partnerIdx = indexOfNodeId(node.mirrorId);
+    node.mirrorId = null;
+    if (partnerIdx >= 0) {
+      points[partnerIdx].mirrorId = null;
+      points[partnerIdx].primary = true;
+    }
+  }
+
+  function getMirrorIndex(idx) {
+    if (idx < 0) return -1;
+    const node = points[idx];
+    if (!node || node.mirrorId == null) return -1;
+    return indexOfNodeId(node.mirrorId);
+  }
+
+  function primaryIndexFor(idx) {
+    if (idx < 0) return -1;
+    const node = points[idx];
+    if (!node) return -1;
+    if (node.primary || node.mirrorId == null) return idx;
+    const partnerIdx = indexOfNodeId(node.mirrorId);
+    return partnerIdx >= 0 ? partnerIdx : idx;
+  }
+
+  function clearSelection() {
+    selectedIds.clear();
+  }
+
+  function isIndexSelected(idx) {
+    const node = points[idx];
+    return !!node && selectedIds.has(node.id);
+  }
+
+  function addIndexToSelection(idx) {
+    const node = points[idx];
+    if (node) selectedIds.add(node.id);
+  }
+
+  function removeIndexFromSelection(idx) {
+    const node = points[idx];
+    if (node) selectedIds.delete(node.id);
+  }
+
+  function getSelectedIndices() {
+    const out = [];
+    selectedIds.forEach((id) => {
+      const idx = indexOfNodeId(id);
+      if (idx >= 0) out.push(idx);
+    });
+    return out;
+  }
+
+  function createHistoryManager() {
+    const past = [];
+    const future = [];
+    let checkpoint = null;
+
+    function snapshot() {
+      return {
+        points: points.map(cloneNode),
+        selectedIds: Array.from(selectedIds),
+        pan: { x: pan.x, y: pan.y },
+        zoom,
+        mirrorEnabled,
+        nodeIdCounter,
+        weightEnabled,
+        perHopFalloff,
+        maxHops,
+      };
+    }
+
+    function restore(state) {
+      suppressHistory = true;
+      points = state.points.map(cloneNode);
+      selectedIds = new Set(state.selectedIds);
+      pan = { x: state.pan.x, y: state.pan.y };
+      zoom = state.zoom;
+      mirrorEnabled = state.mirrorEnabled;
+      nodeIdCounter = state.nodeIdCounter;
+      weightEnabled = state.weightEnabled;
+      perHopFalloff = state.perHopFalloff;
+      maxHops = state.maxHops;
+      mirrorChk.checked = mirrorEnabled;
+      weightChk.checked = weightEnabled;
+      falloffInput.value = String(perHopFalloff);
+      hopsInput.value = String(maxHops);
+      rebuildIndex();
+      updateOutputs();
+      draw();
+      suppressHistory = false;
+    }
+
+    return {
+      begin(label) {
+        if (suppressHistory) return;
+        if (checkpoint) return;
+        checkpoint = { label, state: snapshot() };
+      },
+      commit() {
+        if (!checkpoint) return;
+        past.push(checkpoint);
+        future.length = 0;
+        checkpoint = null;
+      },
+      cancel() {
+        checkpoint = null;
+      },
+      record(label) {
+        if (suppressHistory) return;
+        past.push({ label, state: snapshot() });
+        future.length = 0;
+      },
+      undo() {
+        if (checkpoint) this.cancel();
+        if (past.length === 0) return;
+        const current = snapshot();
+        const entry = past.pop();
+        future.push({ label: entry.label, state: current });
+        restore(entry.state);
+      },
+      redo() {
+        if (future.length === 0) return;
+        const current = snapshot();
+        const entry = future.pop();
+        past.push({ label: entry.label, state: current });
+        restore(entry.state);
+      },
+      clear() {
+        past.length = 0;
+        future.length = 0;
+        checkpoint = null;
+      },
+    };
+  }
 
   // CSS var helper for canvas colors
   function cssVar(name) {
@@ -60,7 +250,7 @@
       const t = (i / N) * Math.PI * 2 - Math.PI / 2; // start at top, CCW
       const x = R * Math.cos(t);
       const y = R * Math.sin(t);
-      arr.push({ x, y });
+      arr.push(createNode(x, y));
     }
     return arr;
   }
@@ -74,7 +264,10 @@
     N = Math.max(3, Math.floor(N || 3));
     nInput.value = N;
     points = makeRegularPolygon(N);
-    selectedSet.clear();
+    rebuildIndex();
+    if (mirrorEnabled) rebuildMirrorPairs();
+    else clearMirrorPairs();
+    clearSelection();
     updateOutputs();
     draw();
   }
@@ -127,15 +320,21 @@
     }
 
     // handles
+    const hoverPrimaryIdx = primaryIndexFor(hoverIdx);
+    const hoverMirrorIdx = hoverPrimaryIdx >= 0 ? getMirrorIndex(hoverPrimaryIdx) : -1;
     for (let i = 0; i < points.length; i++) {
-      const p = worldToCanvas(points[i]);
-      const isSel = selectedSet.has(i);
+      const node = points[i];
+      const p = worldToCanvas(node);
+      const mirrorIdx = indexOfNodeId(node.mirrorId);
+      const isSel =
+        isIndexSelected(i) || (!node.primary && mirrorIdx >= 0 && isIndexSelected(mirrorIdx));
       const r = isSel ? 6 : 4;
       ctx.beginPath();
       ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      const isHover = i === hoverIdx || i === hoverPrimaryIdx || i === hoverMirrorIdx;
       ctx.fillStyle = isSel
         ? "#1a73e8"
-        : i === hoverIdx
+        : isHover
         ? "#444444"
         : "#666666";
       ctx.fill();
@@ -205,36 +404,19 @@
     return best;
   }
 
-  // Mirror partner search (Y-axis symmetry)
-  function findMirrorPartnerIndex(prevWorldPos, excludeIndex) {
-    const target = { x: -prevWorldPos.x, y: prevWorldPos.y };
-    const targetScreen = worldToCanvas(target);
-    const thresh = 10; // pixels
-    let best = -1;
-    let bestD = Infinity;
-    for (let k = 0; k < points.length; k++) {
-      if (k === excludeIndex) continue;
-      const pk = worldToCanvas(points[k]);
-      const d = Math.hypot(pk.x - targetScreen.x, pk.y - targetScreen.y);
-      if (d < thresh && d < bestD) {
-        best = k;
-        bestD = d;
-      }
-    }
-    return best;
-  }
-
   function moveSelectedBy(dx, dy) {
-    if (selectedSet.size === 0) return;
+    if (selectedIds.size === 0) return;
+
+    const selectedIndices = getSelectedIndices();
+    if (selectedIndices.length === 0) return;
 
     const N = points.length;
-    // build per-vertex weights
     const weights = new Array(N).fill(0);
     for (let i = 0; i < N; i++) {
       let best = Infinity;
-      selectedSet.forEach((s) => {
+      for (const s of selectedIndices) {
         best = Math.min(best, ringDistance(i, s, N));
-      });
+      }
       if (best === 0) {
         weights[i] = 1;
       } else if (weightEnabled && best <= maxHops) {
@@ -244,38 +426,137 @@
       }
     }
 
-    // compute deltas per vertex
-    const delta = new Array(N).fill(null).map(() => ({ dx: 0, dy: 0 }));
+    const affectedPrimaries = new Set();
     for (let i = 0; i < N; i++) {
       const w = weights[i];
-      if (w > 0) {
-        delta[i].dx = dx * w;
-        delta[i].dy = dy * w;
+      if (w === 0) continue;
+      points[i].x += dx * w;
+      points[i].y += dy * w;
+      const primaryIdx = primaryIndexFor(i);
+      if (primaryIdx >= 0) affectedPrimaries.add(primaryIdx);
+    }
+
+    if (mirrorEnabled && affectedPrimaries.size > 0) {
+      applyMirrorConstraints(affectedPrimaries);
+    }
+  }
+
+  function applyMirrorConstraints(affectedPrimaries) {
+    const processed = new Set();
+    affectedPrimaries.forEach((primaryIdx) => {
+      const canonicalIdx = primaryIndexFor(primaryIdx);
+      if (canonicalIdx < 0) return;
+      const primary = points[canonicalIdx];
+      if (!primary || processed.has(primary.id)) return;
+      const partnerIdx = getMirrorIndex(canonicalIdx);
+      if (partnerIdx < 0) return;
+      const partner = points[partnerIdx];
+      processed.add(primary.id);
+      processed.add(partner.id);
+
+  const primarySelected = isIndexSelected(canonicalIdx);
+  const partnerSelected = isIndexSelected(partnerIdx);
+
+      if (primarySelected && !partnerSelected) {
+        partner.x = -primary.x;
+        partner.y = primary.y;
+      } else if (!primarySelected && partnerSelected) {
+        primary.x = -partner.x;
+        primary.y = partner.y;
+      } else if (primarySelected && partnerSelected) {
+        const avgY = (primary.y + partner.y) / 2;
+        const magnitude = (Math.abs(primary.x) + Math.abs(partner.x)) / 2;
+        const primarySign = primary.x >= 0 ? 1 : -1;
+        primary.y = avgY;
+        partner.y = avgY;
+        primary.x = magnitude * primarySign;
+        partner.x = -primary.x;
+      } else {
+        partner.x = -primary.x;
+        partner.y = primary.y;
+      }
+    });
+  }
+
+  function insertVertexOnEdge(edgeIndex, worldPos) {
+    if (points.length < 3) return -1;
+    const beforeLength = points.length;
+    const edgeStart = ((edgeIndex % beforeLength) + beforeLength) % beforeLength;
+    const edgeEnd = (edgeStart + 1) % beforeLength;
+
+  const endPrimaryIdx = primaryIndexFor(edgeEnd);
+  const endMirrorIdx = getMirrorIndex(endPrimaryIdx);
+  const endMirrorId = endMirrorIdx >= 0 ? points[endMirrorIdx].id : null;
+
+    const newNode = createNode(worldPos.x, worldPos.y, { primary: true });
+    points.splice(edgeStart + 1, 0, newNode);
+    rebuildIndex();
+    let newIdx = indexOfNodeId(newNode.id);
+
+    if (mirrorEnabled && Math.abs(worldPos.x) > EPS) {
+      let mirrorInsertIndex = -1;
+      if (endMirrorId != null) {
+        const endMirrorIdxNow = indexOfNodeId(endMirrorId);
+        if (endMirrorIdxNow >= 0) {
+          mirrorInsertIndex = endMirrorIdxNow + 1;
+        }
+      }
+
+      const mirrorNode = createNode(-worldPos.x, worldPos.y, {
+        primary: false,
+        mirrorId: newNode.id,
+      });
+      newNode.mirrorId = mirrorNode.id;
+      if (mirrorInsertIndex < 0 || mirrorInsertIndex > points.length) {
+        mirrorInsertIndex = newIdx + 1;
+      }
+      points.splice(mirrorInsertIndex, 0, mirrorNode);
+      rebuildIndex();
+      newIdx = indexOfNodeId(newNode.id);
+      const mirrorIdx = indexOfNodeId(mirrorNode.id);
+      if (newIdx >= 0 && mirrorIdx >= 0) {
+        linkMirrorPair(newIdx, mirrorIdx);
       }
     }
 
-    // apply deltas to geometry
-    for (let i = 0; i < N; i++) {
-      points[i].x += delta[i].dx;
-      points[i].y += delta[i].dy;
-    }
+    return indexOfNodeId(newNode.id);
+  }
 
-    // mirror partners **for directly manipulated vertices only** (keeps prior behavior)
-    if (mirrorEnabled) {
-      const movedMirror = new Set();
-      selectedSet.forEach((i) => {
-        const prev = { x: points[i].x - dx, y: points[i].y - dy }; // previous before this step
-        const partner = findMirrorPartnerIndex(prev, i);
-        if (
-          partner >= 0 &&
-          !selectedSet.has(partner) &&
-          !movedMirror.has(partner)
-        ) {
-          points[partner].x -= dx; // flip X
-          points[partner].y += dy; // same Y
-          movedMirror.add(partner);
+  function clearMirrorPairs() {
+    points.forEach((node) => {
+      node.mirrorId = null;
+      node.primary = true;
+    });
+  }
+
+  function rebuildMirrorPairs() {
+    clearMirrorPairs();
+    if (!mirrorEnabled) return;
+    const used = new Set();
+    for (let i = 0; i < points.length; i++) {
+      const node = points[i];
+      if (used.has(node.id)) continue;
+      if (Math.abs(node.x) <= EPS) continue;
+      let bestIdx = -1;
+      let bestScore = Infinity;
+      for (let j = 0; j < points.length; j++) {
+        if (i === j) continue;
+        const other = points[j];
+        if (used.has(other.id)) continue;
+        if (Math.sign(node.x) === Math.sign(other.x)) continue;
+        const symmetryError = Math.abs(node.x + other.x);
+        if (symmetryError > 5) continue;
+        const score = symmetryError + Math.abs(node.y - other.y);
+        if (score < bestScore) {
+          bestScore = score;
+          bestIdx = j;
         }
-      });
+      }
+      if (bestIdx >= 0) {
+        linkMirrorPair(i, bestIdx);
+        used.add(node.id);
+        used.add(points[bestIdx].id);
+      }
     }
   }
 
@@ -289,12 +570,15 @@
   }
   function selectInScreenRect(rect, mode) {
     // mode: 'replace' | 'add'
-    const base = mode === "add" ? new Set(selectedSet) : new Set();
+    const base = mode === "add" ? new Set(selectedIds) : new Set();
     for (let i = 0; i < points.length; i++) {
       const p = worldToCanvas(points[i]);
-      if (rectContainsPointScreen(rect, p)) base.add(i);
+      if (rectContainsPointScreen(rect, p)) {
+        const primaryIdx = primaryIndexFor(i);
+        if (primaryIdx >= 0) base.add(points[primaryIdx].id);
+      }
     }
-    selectedSet = base;
+    selectedIds = base;
   }
 
   // Interaction
@@ -305,10 +589,12 @@
     const pt = { x: e.clientX - rect.left, y: e.clientY - rect.top };
     if (dragging && dragMode === "move") {
       const w = canvasToWorld(pt);
-      const dx = w.x - dragAnchorWorld.x;
-      const dy = w.y - dragAnchorWorld.y;
+      const rawDx = w.x - dragAnchorWorld.x;
+      const rawDy = w.y - dragAnchorWorld.y;
       dragAnchorWorld = w;
-      moveSelectedBy(dx, dy);
+      const adjDx = activeDragIsMirror ? -rawDx : rawDx;
+      moveSelectedBy(adjDx, rawDy);
+      if (Math.abs(rawDx) > EPS || Math.abs(rawDy) > EPS) moveApplied = true;
       updateOutputs();
       draw();
     } else if (dragging && dragMode === "pan") {
@@ -337,32 +623,46 @@
     const pt = { x: e.clientX - rect.left, y: e.clientY - rect.top };
     const idx = hitTest(pt);
     if (idx >= 0) {
+      const canonicalIdx = primaryIndexFor(idx);
+      const selectionIdx = canonicalIdx >= 0 ? canonicalIdx : idx;
       if (e.shiftKey || e.metaKey || e.ctrlKey) {
         // toggle selection
-        if (selectedSet.has(idx)) selectedSet.delete(idx);
-        else selectedSet.add(idx);
+        if (isIndexSelected(selectionIdx)) removeIndexFromSelection(selectionIdx);
+        else addIndexToSelection(selectionIdx);
       } else {
-        if (!selectedSet.has(idx)) {
-          selectedSet.clear();
-          selectedSet.add(idx);
+        if (!isIndexSelected(selectionIdx)) {
+          clearSelection();
+          addIndexToSelection(selectionIdx);
         }
       }
-      dragging = true;
-      dragMode = "move";
-      dragAnchorWorld = canvasToWorld(pt);
+      if (isIndexSelected(selectionIdx)) {
+        dragging = true;
+        dragMode = "move";
+        dragAnchorWorld = canvasToWorld(pt);
+        history.begin("Move Vertices");
+        moveHistoryActive = true;
+        moveApplied = false;
+        activeDragCanonical = selectionIdx;
+        activeDragIsMirror = idx !== selectionIdx;
+      } else {
+        dragging = false;
+        dragMode = null;
+        activeDragCanonical = -1;
+        activeDragIsMirror = false;
+      }
       draw();
     } else if (e.shiftKey) {
       // Add a point at nearest edge
       const ne = nearestEdge(pt);
       const world = canvasToWorld(ne.closest);
-      const insertIndex = ne.i + 1;
-      points.splice(insertIndex, 0, world);
-      // shift selections >= insertIndex
-      const newSel = new Set();
-      selectedSet.forEach((i) => newSel.add(i >= insertIndex ? i + 1 : i));
-      selectedSet = newSel;
-      updateOutputs();
-      draw();
+      if (!suppressHistory) history.record("Insert Vertex");
+      const newIdx = insertVertexOnEdge(ne.i, world);
+      if (newIdx >= 0) {
+        clearSelection();
+        addIndexToSelection(newIdx);
+        updateOutputs();
+        draw();
+      }
     } else {
       // Decide between box-select (left) vs pan (right/middle)
       if (e.button === 0) {
@@ -380,16 +680,32 @@
   });
 
   canvas.addEventListener("mouseup", () => {
+    if (moveHistoryActive) {
+      if (moveApplied) history.commit();
+      else history.cancel();
+      moveHistoryActive = false;
+      moveApplied = false;
+    }
     dragging = false;
     dragMode = null;
+    activeDragCanonical = -1;
+    activeDragIsMirror = false;
     boxStart = null;
     boxEnd = null;
     draw();
   });
   canvas.addEventListener("mouseleave", () => {
+    if (moveHistoryActive) {
+      if (moveApplied) history.commit();
+      else history.cancel();
+      moveHistoryActive = false;
+      moveApplied = false;
+    }
     dragging = false;
     hoverIdx = -1;
     dragMode = null;
+    activeDragCanonical = -1;
+    activeDragIsMirror = false;
     boxStart = null;
     boxEnd = null;
     draw();
@@ -413,12 +729,62 @@
   );
 
   window.addEventListener("keydown", (e) => {
-    if ((e.key === "Delete" || e.key === "Backspace") && selectedSet.size > 0) {
-      if (points.length - selectedSet.size >= 3) {
-        // delete in descending order to keep indexes stable
-        const arr = Array.from(selectedSet).sort((a, b) => b - a);
-        arr.forEach((i) => points.splice(i, 1));
-        selectedSet.clear();
+    const key = e.key.toLowerCase();
+    const wantsUndo = (e.ctrlKey || e.metaKey) && !e.shiftKey && key === "z";
+    const wantsRedo =
+      ((e.ctrlKey || e.metaKey) && e.shiftKey && key === "z") ||
+      ((e.ctrlKey || e.metaKey) && key === "y");
+
+    if (wantsUndo) {
+      e.preventDefault();
+      if (moveHistoryActive) {
+        moveHistoryActive = false;
+        moveApplied = false;
+      }
+      if (dragging) {
+        dragging = false;
+        dragMode = null;
+        activeDragCanonical = -1;
+        activeDragIsMirror = false;
+      }
+      history.undo();
+      return;
+    }
+    if (wantsRedo) {
+      e.preventDefault();
+      if (moveHistoryActive) {
+        moveHistoryActive = false;
+        moveApplied = false;
+      }
+      if (dragging) {
+        dragging = false;
+        dragMode = null;
+        activeDragCanonical = -1;
+        activeDragIsMirror = false;
+      }
+      history.redo();
+      return;
+    }
+
+    if ((e.key === "Delete" || e.key === "Backspace") && selectedIds.size > 0) {
+      const selectedIndices = getSelectedIndices();
+      const removalSet = new Set(selectedIndices);
+      selectedIndices.forEach((idx) => {
+        const primaryIdx = primaryIndexFor(idx);
+        const partnerIdx = getMirrorIndex(primaryIdx);
+        if (partnerIdx >= 0) removalSet.add(partnerIdx);
+      });
+      if (points.length - removalSet.size >= 3) {
+        if (!suppressHistory) history.record("Delete Vertices");
+        Array.from(removalSet)
+          .sort((a, b) => b - a)
+          .forEach((i) => {
+            removeIndexFromSelection(i);
+            points.splice(i, 1);
+          });
+        clearSelection();
+        rebuildIndex();
+        if (mirrorEnabled) rebuildMirrorPairs();
         updateOutputs();
         draw();
       }
@@ -426,24 +792,54 @@
   });
 
   // Buttons
-  resetBtn.addEventListener("click", () => setN(parseInt(nInput.value, 10)));
-  nInput.addEventListener("change", () => setN(parseInt(nInput.value, 10)));
+  resetBtn.addEventListener("click", () => {
+    if (suppressHistory) return;
+    history.record("Reset Polygon");
+    setN(parseInt(nInput.value, 10));
+  });
+  nInput.addEventListener("change", () => {
+    if (suppressHistory) return;
+    history.record("Change Sides");
+    setN(parseInt(nInput.value, 10));
+  });
   centerBtn.addEventListener("click", () => {
+    if (suppressHistory) return;
+    history.record("Center View");
     pan.x = 0;
     pan.y = 0;
     zoom = 1;
     draw();
   });
   mirrorChk.addEventListener("change", () => {
+    if (suppressHistory) return;
+    history.record("Toggle Mirror");
     mirrorEnabled = mirrorChk.checked;
+    if (mirrorEnabled) {
+      rebuildMirrorPairs();
+      const primaries = new Set();
+      points.forEach((node, idx) => {
+        if (node.mirrorId != null && node.primary) primaries.add(idx);
+      });
+      if (primaries.size > 0) applyMirrorConstraints(primaries);
+    } else {
+      clearMirrorPairs();
+    }
+    updateOutputs();
+    draw();
   });
   weightChk.addEventListener("change", () => {
+    if (suppressHistory) return;
+    history.record("Toggle Weights");
     weightEnabled = weightChk.checked;
   });
   falloffInput.addEventListener("input", () => {
+    if (suppressHistory) return;
+    history.record("Change Falloff");
     perHopFalloff = parseFloat(falloffInput.value);
   });
   hopsInput.addEventListener("change", () => {
+    if (suppressHistory) return;
+    history.record("Change Hops");
     maxHops = Math.max(1, Math.min(32, parseInt(hopsInput.value || "3", 10)));
     hopsInput.value = String(maxHops);
   });
@@ -547,12 +943,11 @@
 
     // Y-axis mirror: moving a point moves its partner with flipped X delta
     (function () {
-      points = [
-        { x: 100, y: 20 },
-        { x: -100, y: 20 },
-        { x: 0, y: -150 },
-      ];
-      selectedSet = new Set([0]);
+      points = [createNode(100, 20), createNode(-100, 20, { primary: false }), createNode(0, -150)];
+      linkMirrorPair(0, 1);
+      rebuildIndex();
+      clearSelection();
+      addIndexToSelection(0);
       mirrorEnabled = true;
       weightEnabled = false;
       moveSelectedBy(30, -10);
@@ -578,7 +973,7 @@
         },
         "replace"
       );
-      const ok = selectedSet.has(0) && selectedSet.has(1);
+      const ok = selectedIds.has(points[0].id) && selectedIds.has(points[1].id);
       assert(ok, "box select includes vertices inside rect");
       setN(parseInt(nInput.value, 10));
     })();
@@ -588,7 +983,8 @@
       setN(8);
       pan = { x: 0, y: 0 };
       zoom = 1; // regular octagon roughly symmetric
-      selectedSet = new Set([0]);
+      clearSelection();
+      addIndexToSelection(0);
       weightEnabled = true;
       perHopFalloff = 0.5;
       maxHops = 2;
@@ -614,6 +1010,7 @@
   // Init
   setN(parseInt(nInput.value, 10));
   centerBtn.click();
+  history.clear();
 
   // Ensure full-bleed canvas sizing works on load
   function fitCanvasToParent() {
