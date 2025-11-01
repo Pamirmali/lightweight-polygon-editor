@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Simple Web Sprite Editor</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <div class="canvas-wrap">
+        <div class="toolbar">
+          <label
+            >Vertices (N):
+            <input id="nInput" type="number" min="3" step="1" value="8"
+          /></label>
+          <button id="resetBtn" title="Rebuild a regular N-gon">
+            Reset Circle
+          </button>
+          <button id="centerBtn" title="Recenter view">Center</button>
+          <label><input type="checkbox" id="mirrorChk" /> Mirror Y-axis</label>
+          <label><input type="checkbox" id="weightChk" /> Weighted Move</label>
+          <label class="small"
+            >Falloff
+            <input
+              id="falloffInput"
+              type="range"
+              min="0"
+              max="1"
+              step="0.05"
+              value="0.5"
+          /></label>
+          <label class="small"
+            >Max hops
+            <input
+              id="hopsInput"
+              type="number"
+              min="1"
+              max="32"
+              value="3"
+              style="width: 54px"
+          /></label>
+          <button id="exportBtn" title="Copy both arrays as JSON">
+            Copy Arrays
+          </button>
+          <span class="small"
+            >Drag points • <strong>Drag empty = box select</strong> (Shift =
+            add) • Right/Middle drag = pan • Shift on empty = add point •
+            ⌫/Delete = remove selected</span
+          >
+        </div>
+        <canvas id="canvas"></canvas>
+      </div>
+
+      <aside class="sidebar">
+        <div class="panel">
+          <h3>Coordinate System</h3>
+          <div class="small">
+            Origin (0, 0) is the <strong>canvas center</strong>. +X is right, +Y
+            is up.
+          </div>
+        </div>
+        <div class="panel">
+          <div class="copy-row">
+            <button id="copyVerts">Copy Vertices [N×2]</button>
+          </div>
+          <h3>Vertices [N × 2]</h3>
+          <pre id="vertsOut">[]</pre>
+        </div>
+        <div class="panel">
+          <div class="copy-row">
+            <button id="copyTris">Copy Triangles [(N−2) × 3]</button>
+          </div>
+          <h3>Triangles [(N−2) × 3]</h3>
+          <pre id="trisOut">[]</pre>
+          <div class="legend small">
+            Triangles are a fan: [0, i, i+1] for i = 1..N−2.
+          </div>
+        </div>
+        <div class="panel">
+          <div class="copy-row">
+            <button id="runTests">Run Self-Tests</button>
+          </div>
+          <h3>Self-Test Output</h3>
+          <pre id="testOut">(no tests run yet)</pre>
+        </div>
+      </aside>
+    </div>
+
+    <script src="index.js"></script>
+  </body>
+</html>
