@@ -1,5 +1,4 @@
 test
-package-lock.json
 node_modules/
 dist/
 .parcel-cache

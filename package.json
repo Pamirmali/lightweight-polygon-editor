@@ -1,16 +1,30 @@
 {
-  "name": "javascript",
+  "name": "lightweight-polygon-editor",
   "version": "1.0.0",
-  "description": "The JavaScript template",
+  "description": "Poly Studio - A lightweight 2D shape editor",
   "scripts": {
     "start": "parcel ./src/index.html",
     "serve": "node server.js",
-    "build": "parcel build ./src/index.html"
+    "build": "parcel build ./src/index.html --public-url ./ --no-source-maps",
+    "build:dev": "parcel build ./src/index.html",
+    "lint": "eslint src/**/*.js",
+    "clean": "rm -rf dist .parcel-cache",
+    "prebuild": "npm run clean"
   },
   "devDependencies": {
-    "parcel": "^2.0.0",
-    "babel-eslint": "^10.1.0",
-    "eslint": "^7.2.0"
+    "@parcel/transformer-inline-string": "^2.12.0",
+    "parcel": "^2.12.0",
+    "eslint": "^8.57.0"
   },
-  "keywords": ["css", "javascript"]
+  "keywords": ["polygon", "editor", "canvas", "2d", "shapes", "javascript"],
+  "homepage": "https://pamirmali.github.io/lightweight-polygon-editor/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Pamirmali/lightweight-polygon-editor.git"
+  },
+  "license": "MIT",
+  "browserslist": [
+    "defaults",
+    "not IE 11"
+  ]
 }
