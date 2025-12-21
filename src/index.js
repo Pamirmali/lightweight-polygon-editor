@@ -1,1031 +1,695 @@
-(function () {
-  const canvas = document.getElementById("canvas");
-  const ctx = canvas.getContext("2d");
-  const nInput = document.getElementById("nInput");
-  const resetBtn = document.getElementById("resetBtn");
-  const centerBtn = document.getElementById("centerBtn");
-  const mirrorChk = document.getElementById("mirrorChk");
-  const weightChk = document.getElementById("weightChk");
-  const falloffInput = document.getElementById("falloffInput");
-  const hopsInput = document.getElementById("hopsInput");
-  const exportBtn = document.getElementById("exportBtn");
-  const vertsOut = document.getElementById("vertsOut");
-  const trisOut = document.getElementById("trisOut");
-  const copyVertsBtn = document.getElementById("copyVerts");
-  const copyTrisBtn = document.getElementById("copyTris");
-  const runTestsBtn = document.getElementById("runTests");
-  const testOut = document.getElementById("testOut");
+// Lightweight Polygon Editor - Main Entry Point
+import { EventEmitter } from './core/EventEmitter.js';
+import { HistoryManager } from './core/HistoryManager.js';
+import { GridSystem } from './core/GridSystem.js';
+import { CanvasRenderer } from './core/CanvasRenderer.js';
+import { FrameManager } from './core/FrameManager.js';
+import { LayerManager } from './core/LayerManager.js';
+import { ShapeFactory } from './core/ShapeFactory.js';
+import { InputHandler } from './core/InputHandler.js';
+import { ToolManager } from './core/ToolManager.js';
+import { ExportManager } from './core/ExportManager.js';
 
-  // State
-  let points = []; // node array, each entry is {id,x,y,mirrorId,primary}
-  let nodeIdCounter = 1;
-  const idToIndex = new Map();
-  let selectedIds = new Set();
-  let hoverIdx = -1;
-  let dragging = false;
-  let dragMode = null; // 'move' | 'pan' | 'box'
-  let dragAnchorWorld = { x: 0, y: 0 };
-  let boxStart = null; // screen space {x,y}
-  let boxEnd = null; // screen space {x,y}
-  let boxAdditive = false; // shift-add mode
-  let pan = { x: 0, y: 0 };
-  let zoom = 1;
-  let mirrorEnabled = false; // Y-axis mirror
-  let weightEnabled = false; // weighted follow
-  let perHopFalloff = 0.5; // 0..1
-  let maxHops = 3;
-  const EPS = 1e-6;
-  let suppressHistory = false;
-  const history = createHistoryManager();
-  let moveHistoryActive = false;
-  let moveApplied = false;
-  let activeDragCanonical = -1;
-  let activeDragIsMirror = false;
-
-  function createNode(x, y, opts = {}) {
-    return {
-      id: nodeIdCounter++,
-      x,
-      y,
-      mirrorId: opts.mirrorId ?? null,
-      primary: opts.primary ?? true,
+class PolygonEditor {
+  constructor() {
+    // Default canvas size in grid units
+    this.canvasWidth = 800;
+    this.canvasHeight = 600;
+    
+    // Initialize state
+    this.state = {
+      zoom: 1,
+      panX: 0,  // Will be set to center in resizeCanvas
+      panY: 0,
+      showGrid: true,
+      snapToGrid: true,
+      gridSize: 20,
+      canvasSizePreset: '800x600',
+      mirrorEnabled: false,
+      mirrorX: 0,  // Mirror at x=0 (center)
+      onionSkinning: false,
+      selectedShapes: [],
+      selectedVertices: [],
+      fps: 12,
+      currentTool: 'select',
+      polygonSides: 6,
+      previewPath: null,
+      previewPoint: null,
+      previewShape: null,
+      selectionBox: null,
+      snapIndicator: null,
+      clipboard: null
     };
+
+    // Create core systems
+    this.events = new EventEmitter();
+    
+    // Initialize after DOM is ready
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', () => this.init());
+    } else {
+      this.init();
+    }
   }
 
-  function cloneNode(node) {
-    return {
-      id: node.id,
-      x: node.x,
-      y: node.y,
-      mirrorId: node.mirrorId,
-      primary: node.primary,
-    };
-  }
+  init() {
+    // Get canvas
+    this.canvas = document.getElementById('editor-canvas');
+    this.ctx = this.canvas.getContext('2d');
 
-  function rebuildIndex() {
-    idToIndex.clear();
-    points.forEach((node, idx) => {
-      idToIndex.set(node.id, idx);
+    // Create managers
+    this.history = new HistoryManager(this);
+    this.grid = new GridSystem(this);
+    this.renderer = new CanvasRenderer(this);
+    this.frames = new FrameManager(this);
+    this.layers = new LayerManager(this);
+    this.shapes = new ShapeFactory(this);
+    this.input = new InputHandler(this);
+    this.tools = new ToolManager(this);
+    this.exporter = new ExportManager(this);
+
+    // Initialize input
+    this.input.init(this.canvas);
+
+    // Setup canvas
+    this.resizeCanvas();
+    window.addEventListener('resize', () => this.resizeCanvas());
+
+    // Setup UI
+    this.setupToolbar();
+    this.setupPanels();
+
+    // Setup cursor coordinate display
+    this.events.on('input:cursormove', ({ pos }) => {
+      const display = document.getElementById('coordDisplay');
+      if (display) {
+        display.textContent = `X: ${Math.round(pos.x)}  Y: ${Math.round(pos.y)}`;
+      }
     });
+
+    // Create initial frame and layer
+    this.frames.addFrame();
+    this.layers.addLayer('Layer 1');
+
+    // Initial render
+    this.centerView();
+    this.saveHistory();
+
+    console.log('Polygon Editor initialized');
   }
 
-  function indexOfNodeId(id) {
-    if (id == null) return -1;
-    return idToIndex.has(id) ? idToIndex.get(id) : -1;
-  }
-
-  function linkMirrorPair(primaryIdx, mirrorIdx) {
-    if (primaryIdx < 0 || mirrorIdx < 0) return;
-    const primary = points[primaryIdx];
-    const mirror = points[mirrorIdx];
-    if (!primary || !mirror) return;
-    primary.mirrorId = mirror.id;
-    mirror.mirrorId = primary.id;
-    mirror.primary = false;
-    primary.primary = true;
-  }
-
-  function unlinkMirror(idx) {
-    const node = points[idx];
-    if (!node || node.mirrorId == null) return;
-    const partnerIdx = indexOfNodeId(node.mirrorId);
-    node.mirrorId = null;
-    if (partnerIdx >= 0) {
-      points[partnerIdx].mirrorId = null;
-      points[partnerIdx].primary = true;
-    }
-  }
-
-  function getMirrorIndex(idx) {
-    if (idx < 0) return -1;
-    const node = points[idx];
-    if (!node || node.mirrorId == null) return -1;
-    return indexOfNodeId(node.mirrorId);
-  }
-
-  function primaryIndexFor(idx) {
-    if (idx < 0) return -1;
-    const node = points[idx];
-    if (!node) return -1;
-    if (node.primary || node.mirrorId == null) return idx;
-    const partnerIdx = indexOfNodeId(node.mirrorId);
-    return partnerIdx >= 0 ? partnerIdx : idx;
-  }
-
-  function clearSelection() {
-    selectedIds.clear();
-  }
-
-  function isIndexSelected(idx) {
-    const node = points[idx];
-    return !!node && selectedIds.has(node.id);
-  }
-
-  function addIndexToSelection(idx) {
-    const node = points[idx];
-    if (node) selectedIds.add(node.id);
-  }
-
-  function removeIndexFromSelection(idx) {
-    const node = points[idx];
-    if (node) selectedIds.delete(node.id);
-  }
-
-  function getSelectedIndices() {
-    const out = [];
-    selectedIds.forEach((id) => {
-      const idx = indexOfNodeId(id);
-      if (idx >= 0) out.push(idx);
-    });
-    return out;
-  }
-
-  function createHistoryManager() {
-    const past = [];
-    const future = [];
-    let checkpoint = null;
-
-    function snapshot() {
-      return {
-        points: points.map(cloneNode),
-        selectedIds: Array.from(selectedIds),
-        pan: { x: pan.x, y: pan.y },
-        zoom,
-        mirrorEnabled,
-        nodeIdCounter,
-        weightEnabled,
-        perHopFalloff,
-        maxHops,
-      };
-    }
-
-    function restore(state) {
-      suppressHistory = true;
-      points = state.points.map(cloneNode);
-      selectedIds = new Set(state.selectedIds);
-      pan = { x: state.pan.x, y: state.pan.y };
-      zoom = state.zoom;
-      mirrorEnabled = state.mirrorEnabled;
-      nodeIdCounter = state.nodeIdCounter;
-      weightEnabled = state.weightEnabled;
-      perHopFalloff = state.perHopFalloff;
-      maxHops = state.maxHops;
-      mirrorChk.checked = mirrorEnabled;
-      weightChk.checked = weightEnabled;
-      falloffInput.value = String(perHopFalloff);
-      hopsInput.value = String(maxHops);
-      rebuildIndex();
-      updateOutputs();
-      draw();
-      suppressHistory = false;
-    }
-
-    return {
-      begin(label) {
-        if (suppressHistory) return;
-        if (checkpoint) return;
-        checkpoint = { label, state: snapshot() };
-      },
-      commit() {
-        if (!checkpoint) return;
-        past.push(checkpoint);
-        future.length = 0;
-        checkpoint = null;
-      },
-      cancel() {
-        checkpoint = null;
-      },
-      record(label) {
-        if (suppressHistory) return;
-        past.push({ label, state: snapshot() });
-        future.length = 0;
-      },
-      undo() {
-        if (checkpoint) this.cancel();
-        if (past.length === 0) return;
-        const current = snapshot();
-        const entry = past.pop();
-        future.push({ label: entry.label, state: current });
-        restore(entry.state);
-      },
-      redo() {
-        if (future.length === 0) return;
-        const current = snapshot();
-        const entry = future.pop();
-        past.push({ label: entry.label, state: current });
-        restore(entry.state);
-      },
-      clear() {
-        past.length = 0;
-        future.length = 0;
-        checkpoint = null;
-      },
-    };
-  }
-
-  // CSS var helper for canvas colors
-  function cssVar(name) {
-    return getComputedStyle(document.documentElement)
-      .getPropertyValue(name)
-      .trim();
-  }
-
-  // Sizing / DPR
-  function resize() {
+  resizeCanvas() {
+    const container = this.canvas.parentElement;
     const dpr = window.devicePixelRatio || 1;
-    canvas.width = canvas.clientWidth * dpr;
-    canvas.height = canvas.clientHeight * dpr;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    draw();
-  }
-  new ResizeObserver(resize).observe(canvas);
-
-  // Geometry helpers
-  function makeRegularPolygon(N) {
-    const w = canvas.clientWidth;
-    const h = canvas.clientHeight;
-    const R = Math.min(w, h) * 0.35; // in pixels
-    const arr = [];
-    for (let i = 0; i < N; i++) {
-      const t = (i / N) * Math.PI * 2 - Math.PI / 2; // start at top, CCW
-      const x = R * Math.cos(t);
-      const y = R * Math.sin(t);
-      arr.push(createNode(x, y));
+    
+    this.canvas.width = container.clientWidth * dpr;
+    this.canvas.height = container.clientHeight * dpr;
+    this.canvas.style.width = container.clientWidth + 'px';
+    this.canvas.style.height = container.clientHeight + 'px';
+    
+    this.ctx.scale(dpr, dpr);
+    
+    // Center the origin (0,0) in the middle of the canvas
+    if (this.state.panX === 0 && this.state.panY === 0) {
+      this.state.panX = container.clientWidth / 2;
+      this.state.panY = container.clientHeight / 2;
     }
-    return arr;
+    
+    this.render();
   }
 
-  function ringDistance(i, j, N) {
-    const d = Math.abs(i - j);
-    return Math.min(d, N - d);
+  // Center view on origin with default zoom
+  centerView() {
+    const container = this.canvas.parentElement;
+    this.state.zoom = 1;
+    this.state.panX = container.clientWidth / 2;
+    this.state.panY = container.clientHeight / 2;
+    this.updateZoomDisplay();
+    this.render();
   }
 
-  function setN(N) {
-    N = Math.max(3, Math.floor(N || 3));
-    nInput.value = N;
-    points = makeRegularPolygon(N);
-    rebuildIndex();
-    if (mirrorEnabled) rebuildMirrorPairs();
-    else clearMirrorPairs();
-    clearSelection();
-    updateOutputs();
-    draw();
+  // Fit canvas bounds in view
+  fitCanvasInView() {
+    const container = this.canvas.parentElement;
+    const padding = 50;
+    
+    // Calculate zoom to fit canvas size
+    const zoomX = (container.clientWidth - padding * 2) / this.canvasWidth;
+    const zoomY = (container.clientHeight - padding * 2) / this.canvasHeight;
+    this.state.zoom = Math.min(zoomX, zoomY, 2);
+    
+    // Center origin
+    this.state.panX = container.clientWidth / 2;
+    this.state.panY = container.clientHeight / 2;
+    
+    this.updateZoomDisplay();
+    this.render();
   }
 
-  // Coordinate transforms
-  function worldToCanvas(p) {
-    const cx = canvas.clientWidth / 2 + pan.x;
-    const cy = canvas.clientHeight / 2 + pan.y;
-    return { x: cx + p.x * zoom, y: cy - p.y * zoom };
-  }
-  function canvasToWorld(p) {
-    const cx = canvas.clientWidth / 2 + pan.x;
-    const cy = canvas.clientHeight / 2 + pan.y;
-    return { x: (p.x - cx) / zoom, y: (cy - p.y) / zoom };
-  }
-
-  // Render
-  function draw() {
-    ctx.save();
-    ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
-
-    // axes (subtle)
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = "#eeeeee";
-    const c0 = worldToCanvas({ x: 0, y: 0 });
-    ctx.beginPath();
-    ctx.moveTo(0, c0.y + 0.5);
-    ctx.lineTo(canvas.clientWidth, c0.y + 0.5);
-    ctx.moveTo(c0.x + 0.5, 0);
-    ctx.lineTo(c0.x + 0.5, canvas.clientHeight);
-    ctx.stroke();
-
-    if (points.length >= 3) {
-      // fill polygon (black) — main shape
-      ctx.beginPath();
-      const p0 = worldToCanvas(points[0]);
-      ctx.moveTo(p0.x, p0.y);
-      for (let i = 1; i < points.length; i++) {
-        const p = worldToCanvas(points[i]);
-        ctx.lineTo(p.x, p.y);
-      }
-      ctx.closePath();
-      ctx.fillStyle = "#000000";
-      ctx.fill();
-
-      // outline (thin for editing)
-      ctx.lineWidth = 1;
-      ctx.strokeStyle = "#000000";
-      ctx.stroke();
-    }
-
-    // handles
-    const hoverPrimaryIdx = primaryIndexFor(hoverIdx);
-    const hoverMirrorIdx = hoverPrimaryIdx >= 0 ? getMirrorIndex(hoverPrimaryIdx) : -1;
-    for (let i = 0; i < points.length; i++) {
-      const node = points[i];
-      const p = worldToCanvas(node);
-      const mirrorIdx = indexOfNodeId(node.mirrorId);
-      const isSel =
-        isIndexSelected(i) || (!node.primary && mirrorIdx >= 0 && isIndexSelected(mirrorIdx));
-      const r = isSel ? 6 : 4;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
-      const isHover = i === hoverIdx || i === hoverPrimaryIdx || i === hoverMirrorIdx;
-      ctx.fillStyle = isSel
-        ? "#1a73e8"
-        : isHover
-        ? "#444444"
-        : "#666666";
-      ctx.fill();
-      ctx.strokeStyle = "#ffffff";
-      ctx.lineWidth = 1;
-      ctx.stroke();
-    }
-
-    // selection box
-    if (dragMode === "box" && boxStart && boxEnd) {
-      const x = Math.min(boxStart.x, boxEnd.x);
-      const y = Math.min(boxStart.y, boxEnd.y);
-      const w = Math.abs(boxEnd.x - boxStart.x);
-      const h = Math.abs(boxEnd.y - boxStart.y);
-      ctx.fillStyle = cssVar("--marquee-fill") || "rgba(26,115,232,0.08)";
-      ctx.strokeStyle = cssVar("--marquee-stroke") || "rgba(26,115,232,0.9)";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.rect(x + 0.5, y + 0.5, w, h);
-      ctx.fill();
-      ctx.stroke();
-    }
-
-    ctx.restore();
-  }
-
-  // Picking helpers
-  function hitTest(pt) {
-    const thresh = 8; // px
-    let best = -1;
-    let bestD = Infinity;
-    for (let i = 0; i < points.length; i++) {
-      const p = worldToCanvas(points[i]);
-      const d = Math.hypot(pt.x - p.x, pt.y - p.y);
-      if (d < thresh && d < bestD) {
-        best = i;
-        bestD = d;
-      }
-    }
-    return best;
-  }
-
-  function nearestEdge(pt) {
-    // return {i, t, dist, closest} for edge (i -> i+1)
-    let best = { i: -1, t: 0, dist: Infinity, closest: { x: 0, y: 0 } };
-    for (let i = 0; i < points.length; i++) {
-      const a = worldToCanvas(points[i]);
-      const b = worldToCanvas(points[(i + 1) % points.length]);
-      const ax = a.x,
-        ay = a.y,
-        bx = b.x,
-        by = b.y;
-      const apx = pt.x - ax,
-        apy = pt.y - ay;
-      const abx = bx - ax,
-        aby = by - ay;
-      const ab2 = abx * abx + aby * aby || 1;
-      let t = (apx * abx + apy * aby) / ab2;
-      t = Math.max(0, Math.min(1, t));
-      const cx = ax + abx * t,
-        cy = ay + aby * t;
-      const d = Math.hypot(pt.x - cx, pt.y - cy);
-      if (d < best.dist) {
-        best = { i, t, dist: d, closest: { x: cx, y: cy } };
-      }
-    }
-    return best;
-  }
-
-  function moveSelectedBy(dx, dy) {
-    if (selectedIds.size === 0) return;
-
-    const selectedIndices = getSelectedIndices();
-    if (selectedIndices.length === 0) return;
-
-    const N = points.length;
-    const weights = new Array(N).fill(0);
-    for (let i = 0; i < N; i++) {
-      let best = Infinity;
-      for (const s of selectedIndices) {
-        best = Math.min(best, ringDistance(i, s, N));
-      }
-      if (best === 0) {
-        weights[i] = 1;
-      } else if (weightEnabled && best <= maxHops) {
-        weights[i] = Math.pow(perHopFalloff, best);
-      } else {
-        weights[i] = 0;
-      }
-    }
-
-    const affectedPrimaries = new Set();
-    for (let i = 0; i < N; i++) {
-      const w = weights[i];
-      if (w === 0) continue;
-      points[i].x += dx * w;
-      points[i].y += dy * w;
-      const primaryIdx = primaryIndexFor(i);
-      if (primaryIdx >= 0) affectedPrimaries.add(primaryIdx);
-    }
-
-    if (mirrorEnabled && affectedPrimaries.size > 0) {
-      applyMirrorConstraints(affectedPrimaries);
+  updateZoomDisplay() {
+    const zoomDisplay = document.getElementById('zoomDisplay');
+    if (zoomDisplay) {
+      zoomDisplay.textContent = Math.round(this.state.zoom * 100) + '%';
     }
   }
 
-  function applyMirrorConstraints(affectedPrimaries) {
-    const processed = new Set();
-    affectedPrimaries.forEach((primaryIdx) => {
-      const canonicalIdx = primaryIndexFor(primaryIdx);
-      if (canonicalIdx < 0) return;
-      const primary = points[canonicalIdx];
-      if (!primary || processed.has(primary.id)) return;
-      const partnerIdx = getMirrorIndex(canonicalIdx);
-      if (partnerIdx < 0) return;
-      const partner = points[partnerIdx];
-      processed.add(primary.id);
-      processed.add(partner.id);
-
-  const primarySelected = isIndexSelected(canonicalIdx);
-  const partnerSelected = isIndexSelected(partnerIdx);
-
-      if (primarySelected && !partnerSelected) {
-        partner.x = -primary.x;
-        partner.y = primary.y;
-      } else if (!primarySelected && partnerSelected) {
-        primary.x = -partner.x;
-        primary.y = partner.y;
-      } else if (primarySelected && partnerSelected) {
-        const avgY = (primary.y + partner.y) / 2;
-        const magnitude = (Math.abs(primary.x) + Math.abs(partner.x)) / 2;
-        const primarySign = primary.x >= 0 ? 1 : -1;
-        primary.y = avgY;
-        partner.y = avgY;
-        primary.x = magnitude * primarySign;
-        partner.x = -primary.x;
-      } else {
-        partner.x = -primary.x;
-        partner.y = primary.y;
-      }
-    });
+  setCanvasSize(width, height) {
+    this.canvasWidth = width;
+    this.canvasHeight = height;
+    this.state.canvasSizePreset = `${width}x${height}`;
+    this.fitCanvasInView();
   }
 
-  function insertVertexOnEdge(edgeIndex, worldPos) {
-    if (points.length < 3) return -1;
-    const beforeLength = points.length;
-    const edgeStart = ((edgeIndex % beforeLength) + beforeLength) % beforeLength;
-    const edgeEnd = (edgeStart + 1) % beforeLength;
-
-  const endPrimaryIdx = primaryIndexFor(edgeEnd);
-  const endMirrorIdx = getMirrorIndex(endPrimaryIdx);
-  const endMirrorId = endMirrorIdx >= 0 ? points[endMirrorIdx].id : null;
-
-    const newNode = createNode(worldPos.x, worldPos.y, { primary: true });
-    points.splice(edgeStart + 1, 0, newNode);
-    rebuildIndex();
-    let newIdx = indexOfNodeId(newNode.id);
-
-    if (mirrorEnabled && Math.abs(worldPos.x) > EPS) {
-      let mirrorInsertIndex = -1;
-      if (endMirrorId != null) {
-        const endMirrorIdxNow = indexOfNodeId(endMirrorId);
-        if (endMirrorIdxNow >= 0) {
-          mirrorInsertIndex = endMirrorIdxNow + 1;
+  setupToolbar() {
+    // Tool buttons
+    document.querySelectorAll('.tool-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const tool = btn.dataset.tool;
+        if (tool) {
+          this.setTool(tool);
         }
-      }
-
-      const mirrorNode = createNode(-worldPos.x, worldPos.y, {
-        primary: false,
-        mirrorId: newNode.id,
       });
-      newNode.mirrorId = mirrorNode.id;
-      if (mirrorInsertIndex < 0 || mirrorInsertIndex > points.length) {
-        mirrorInsertIndex = newIdx + 1;
-      }
-      points.splice(mirrorInsertIndex, 0, mirrorNode);
-      rebuildIndex();
-      newIdx = indexOfNodeId(newNode.id);
-      const mirrorIdx = indexOfNodeId(mirrorNode.id);
-      if (newIdx >= 0 && mirrorIdx >= 0) {
-        linkMirrorPair(newIdx, mirrorIdx);
-      }
-    }
-
-    return indexOfNodeId(newNode.id);
-  }
-
-  function clearMirrorPairs() {
-    points.forEach((node) => {
-      node.mirrorId = null;
-      node.primary = true;
     });
-  }
 
-  function rebuildMirrorPairs() {
-    clearMirrorPairs();
-    if (!mirrorEnabled) return;
-    const used = new Set();
-    for (let i = 0; i < points.length; i++) {
-      const node = points[i];
-      if (used.has(node.id)) continue;
-      if (Math.abs(node.x) <= EPS) continue;
-      let bestIdx = -1;
-      let bestScore = Infinity;
-      for (let j = 0; j < points.length; j++) {
-        if (i === j) continue;
-        const other = points[j];
-        if (used.has(other.id)) continue;
-        if (Math.sign(node.x) === Math.sign(other.x)) continue;
-        const symmetryError = Math.abs(node.x + other.x);
-        if (symmetryError > 5) continue;
-        const score = symmetryError + Math.abs(node.y - other.y);
-        if (score < bestScore) {
-          bestScore = score;
-          bestIdx = j;
+    // Grid toggle
+    const gridToggle = document.getElementById('gridToggle');
+    if (gridToggle) {
+      gridToggle.addEventListener('change', (e) => {
+        this.state.showGrid = e.target.checked;
+        this.render();
+      });
+    }
+
+    // Snap toggle
+    const snapToggle = document.getElementById('snapToggle');
+    if (snapToggle) {
+      snapToggle.addEventListener('change', (e) => {
+        this.state.snapToGrid = e.target.checked;
+      });
+    }
+
+    // Grid size
+    const gridSizeInput = document.getElementById('gridSize');
+    if (gridSizeInput) {
+      const updateGridSize = (e) => {
+        this.state.gridSize = parseInt(e.target.value) || 20;
+        this.render();
+      };
+      gridSizeInput.addEventListener('change', updateGridSize);
+      gridSizeInput.addEventListener('input', updateGridSize);
+    }
+
+    // Mirror toggle
+    const mirrorToggle = document.getElementById('mirrorToggle');
+    if (mirrorToggle) {
+      mirrorToggle.addEventListener('change', (e) => {
+        this.state.mirrorEnabled = e.target.checked;
+        this.render();
+      });
+    }
+
+    // Canvas size selector
+    const canvasSizeSelect = document.getElementById('canvasSizeSelect');
+    if (canvasSizeSelect) {
+      canvasSizeSelect.addEventListener('change', (e) => {
+        const value = e.target.value;
+        if (value === 'custom') {
+          const widthStr = prompt('Enter canvas width:', this.canvasWidth);
+          const heightStr = prompt('Enter canvas height:', this.canvasHeight);
+          if (widthStr && heightStr) {
+            const width = parseInt(widthStr) || 800;
+            const height = parseInt(heightStr) || 600;
+            this.setCanvasSize(width, height);
+          }
+        } else {
+          const [width, height] = value.split('x').map(Number);
+          this.setCanvasSize(width, height);
         }
-      }
-      if (bestIdx >= 0) {
-        linkMirrorPair(i, bestIdx);
-        used.add(node.id);
-        used.add(points[bestIdx].id);
-      }
+      });
+    }
+
+    // Polygon sides / vertex count
+    const sidesInput = document.getElementById('vertexCount');
+    if (sidesInput) {
+      const updateSides = (e) => {
+        this.state.polygonSides = parseInt(e.target.value) || 6;
+      };
+      sidesInput.addEventListener('change', updateSides);
+      sidesInput.addEventListener('input', updateSides);
+    }
+
+    // View controls
+    const centerBtn = document.getElementById('centerViewBtn');
+    const fitCanvasBtn = document.getElementById('fitCanvasBtn');
+    const fitBtn = document.getElementById('fitViewBtn');
+    
+    if (centerBtn) centerBtn.addEventListener('click', () => this.centerView());
+    if (fitCanvasBtn) fitCanvasBtn.addEventListener('click', () => this.fitCanvasInView());
+    if (fitBtn) fitBtn.addEventListener('click', () => this.fitToScreen());
+
+    // Export buttons
+    const copyVertices = document.getElementById('copyVertsBtn');
+    const copyTriangles = document.getElementById('copyTrisBtn');
+    const exportJSON = document.getElementById('exportJsonBtn');
+    const exportAnimation = document.getElementById('exportAnimBtn');
+
+    if (copyVertices) copyVertices.addEventListener('click', () => this.exporter.copyVertices());
+    if (copyTriangles) copyTriangles.addEventListener('click', () => this.exporter.copyTriangles());
+    if (exportJSON) exportJSON.addEventListener('click', () => this.exporter.exportJSON());
+    if (exportAnimation) exportAnimation.addEventListener('click', () => this.exporter.exportAnimation());
+
+    // Undo/Redo buttons
+    const undoBtn = document.getElementById('undoBtn');
+    const redoBtn = document.getElementById('redoBtn');
+    
+    if (undoBtn) undoBtn.addEventListener('click', () => this.history.undo());
+    if (redoBtn) redoBtn.addEventListener('click', () => this.history.redo());
+
+    // Create polygon button
+    const createPolygonBtn = document.getElementById('createPolygonBtn');
+    if (createPolygonBtn) {
+      createPolygonBtn.addEventListener('click', () => {
+        const sides = this.state.polygonSides;
+        const rect = this.canvas.getBoundingClientRect();
+        const cx = (rect.width / 2 - this.state.panX) / this.state.zoom;
+        const cy = (rect.height / 2 - this.state.panY) / this.state.zoom;
+        this.shapes.createPolygon(cx, cy, 100, sides);
+        this.saveHistory();
+        this.render();
+      });
+    }
+
+    // Shape modification buttons
+    const subdivideBtn = document.getElementById('subdivideBtn');
+    const simplifyBtn = document.getElementById('simplifyBtn');
+    
+    if (subdivideBtn) {
+      subdivideBtn.addEventListener('click', () => {
+        this.shapes.subdivideSelected();
+        this.saveHistory();
+        this.render();
+      });
+    }
+    
+    if (simplifyBtn) {
+      simplifyBtn.addEventListener('click', () => {
+        const tolerance = parseFloat(document.getElementById('simplifyTolerance')?.value) || 2;
+        this.shapes.simplifySelected(tolerance);
+        this.saveHistory();
+        this.render();
+      });
+    }
+
+    // Transform buttons
+    const flipHBtn = document.getElementById('flipHBtn');
+    const flipVBtn = document.getElementById('flipVBtn');
+    
+    if (flipHBtn) {
+      flipHBtn.addEventListener('click', () => {
+        this.shapes.flipSelectedH();
+        this.saveHistory();
+        this.render();
+      });
+    }
+    
+    if (flipVBtn) {
+      flipVBtn.addEventListener('click', () => {
+        this.shapes.flipSelectedV();
+        this.saveHistory();
+        this.render();
+      });
     }
   }
 
-  // Selection rectangle logic
-  function rectContainsPointScreen(rect, pt) {
-    const x1 = Math.min(rect.x1, rect.x2);
-    const y1 = Math.min(rect.y1, rect.y2);
-    const x2 = Math.max(rect.x1, rect.x2);
-    const y2 = Math.max(rect.y1, rect.y2);
-    return pt.x >= x1 && pt.x <= x2 && pt.y >= y1 && pt.y <= y2;
-  }
-  function selectInScreenRect(rect, mode) {
-    // mode: 'replace' | 'add'
-    const base = mode === "add" ? new Set(selectedIds) : new Set();
-    for (let i = 0; i < points.length; i++) {
-      const p = worldToCanvas(points[i]);
-      if (rectContainsPointScreen(rect, p)) {
-        const primaryIdx = primaryIndexFor(i);
-        if (primaryIdx >= 0) base.add(points[primaryIdx].id);
-      }
+  setupPanels() {
+    // Layer panel
+    const addLayerBtn = document.getElementById('addLayerBtn');
+    const delLayerBtn = document.getElementById('delLayerBtn');
+    
+    if (addLayerBtn) {
+      addLayerBtn.addEventListener('click', () => {
+        const name = `Layer ${this.getCurrentLayers().length + 1}`;
+        this.layers.addLayer(name);
+        this.saveHistory();
+      });
     }
-    selectedIds = base;
-  }
-
-  // Interaction
-  let lastMouse = { x: 0, y: 0 };
-
-  canvas.addEventListener("mousemove", (e) => {
-    const rect = canvas.getBoundingClientRect();
-    const pt = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-    if (dragging && dragMode === "move") {
-      const w = canvasToWorld(pt);
-      const rawDx = w.x - dragAnchorWorld.x;
-      const rawDy = w.y - dragAnchorWorld.y;
-      dragAnchorWorld = w;
-      const adjDx = activeDragIsMirror ? -rawDx : rawDx;
-      moveSelectedBy(adjDx, rawDy);
-      if (Math.abs(rawDx) > EPS || Math.abs(rawDy) > EPS) moveApplied = true;
-      updateOutputs();
-      draw();
-    } else if (dragging && dragMode === "pan") {
-      const dx = pt.x - lastMouse.x;
-      const dy = pt.y - lastMouse.y;
-      pan.x += dx;
-      pan.y += dy;
-      draw();
-    } else if (dragging && dragMode === "box") {
-      boxEnd = pt;
-      const mode = boxAdditive ? "add" : "replace";
-      selectInScreenRect(
-        { x1: boxStart.x, y1: boxStart.y, x2: boxEnd.x, y2: boxEnd.y },
-        mode
-      );
-      draw();
-    } else {
-      hoverIdx = hitTest(pt);
-      draw();
+    
+    if (delLayerBtn) {
+      delLayerBtn.addEventListener('click', () => {
+        this.layers.deleteActiveLayer();
+        this.saveHistory();
+        this.render();
+      });
     }
-    lastMouse = pt;
-  });
 
-  canvas.addEventListener("mousedown", (e) => {
-    const rect = canvas.getBoundingClientRect();
-    const pt = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-    const idx = hitTest(pt);
-    if (idx >= 0) {
-      const canonicalIdx = primaryIndexFor(idx);
-      const selectionIdx = canonicalIdx >= 0 ? canonicalIdx : idx;
-      if (e.shiftKey || e.metaKey || e.ctrlKey) {
-        // toggle selection
-        if (isIndexSelected(selectionIdx)) removeIndexFromSelection(selectionIdx);
-        else addIndexToSelection(selectionIdx);
-      } else {
-        if (!isIndexSelected(selectionIdx)) {
-          clearSelection();
-          addIndexToSelection(selectionIdx);
+    // Frame/Timeline panel
+    const addFrameBtn = document.getElementById('addFrameBtn');
+    const dupFrameBtn = document.getElementById('dupFrameBtn');
+    const delFrameBtn = document.getElementById('delFrameBtn');
+    const playBtn = document.getElementById('playBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const prevFrameBtn = document.getElementById('prevFrameBtn');
+    const nextFrameBtn = document.getElementById('nextFrameBtn');
+    const fpsInput = document.getElementById('fpsInput');
+
+    if (addFrameBtn) {
+      addFrameBtn.addEventListener('click', () => {
+        this.frames.addFrame();
+        this.saveHistory();
+      });
+    }
+    
+    if (dupFrameBtn) {
+      dupFrameBtn.addEventListener('click', () => {
+        this.frames.duplicateFrame();
+        this.saveHistory();
+      });
+    }
+    
+    if (delFrameBtn) {
+      delFrameBtn.addEventListener('click', () => {
+        this.frames.deleteFrame();
+        this.saveHistory();
+      });
+    }
+
+    if (playBtn) {
+      playBtn.addEventListener('click', () => this.togglePlayback());
+    }
+    
+    if (stopBtn) {
+      stopBtn.addEventListener('click', () => {
+        if (this.playbackInterval) {
+          clearInterval(this.playbackInterval);
+          this.playbackInterval = null;
         }
-      }
-      if (isIndexSelected(selectionIdx)) {
-        dragging = true;
-        dragMode = "move";
-        dragAnchorWorld = canvasToWorld(pt);
-        history.begin("Move Vertices");
-        moveHistoryActive = true;
-        moveApplied = false;
-        activeDragCanonical = selectionIdx;
-        activeDragIsMirror = idx !== selectionIdx;
-      } else {
-        dragging = false;
-        dragMode = null;
-        activeDragCanonical = -1;
-        activeDragIsMirror = false;
-      }
-      draw();
-    } else if (e.shiftKey) {
-      // Add a point at nearest edge
-      const ne = nearestEdge(pt);
-      const world = canvasToWorld(ne.closest);
-      if (!suppressHistory) history.record("Insert Vertex");
-      const newIdx = insertVertexOnEdge(ne.i, world);
-      if (newIdx >= 0) {
-        clearSelection();
-        addIndexToSelection(newIdx);
-        updateOutputs();
-        draw();
-      }
-    } else {
-      // Decide between box-select (left) vs pan (right/middle)
-      if (e.button === 0) {
-        dragging = true;
-        dragMode = "box";
-        boxStart = pt;
-        boxEnd = pt;
-        boxAdditive = !!(e.shiftKey || e.metaKey || e.ctrlKey);
-      } else {
-        dragging = true;
-        dragMode = "pan";
-      }
+        this.frames.goToFrame(0);
+      });
     }
-    lastMouse = pt;
-  });
-
-  canvas.addEventListener("mouseup", () => {
-    if (moveHistoryActive) {
-      if (moveApplied) history.commit();
-      else history.cancel();
-      moveHistoryActive = false;
-      moveApplied = false;
+    
+    if (prevFrameBtn) {
+      prevFrameBtn.addEventListener('click', () => this.frames.previousFrame());
     }
-    dragging = false;
-    dragMode = null;
-    activeDragCanonical = -1;
-    activeDragIsMirror = false;
-    boxStart = null;
-    boxEnd = null;
-    draw();
-  });
-  canvas.addEventListener("mouseleave", () => {
-    if (moveHistoryActive) {
-      if (moveApplied) history.commit();
-      else history.cancel();
-      moveHistoryActive = false;
-      moveApplied = false;
+    
+    if (nextFrameBtn) {
+      nextFrameBtn.addEventListener('click', () => this.frames.nextFrame());
     }
-    dragging = false;
-    hoverIdx = -1;
-    dragMode = null;
-    activeDragCanonical = -1;
-    activeDragIsMirror = false;
-    boxStart = null;
-    boxEnd = null;
-    draw();
-  });
 
-  canvas.addEventListener(
-    "wheel",
-    (e) => {
-      e.preventDefault();
-      const mouse = lastMouse;
-      const before = canvasToWorld(mouse);
-      const factor = Math.exp(-e.deltaY * 0.001);
-      zoom = Math.max(0.2, Math.min(5, zoom * factor));
-      const after = canvasToWorld(mouse);
-      // zoom towards mouse: adjust pan so mouse stays put
-      pan.x += (after.x - before.x) * zoom;
-      pan.y -= (after.y - before.y) * zoom;
-      draw();
-    },
-    { passive: false }
-  );
-
-  window.addEventListener("keydown", (e) => {
-    const key = e.key.toLowerCase();
-    const wantsUndo = (e.ctrlKey || e.metaKey) && !e.shiftKey && key === "z";
-    const wantsRedo =
-      ((e.ctrlKey || e.metaKey) && e.shiftKey && key === "z") ||
-      ((e.ctrlKey || e.metaKey) && key === "y");
-
-    if (wantsUndo) {
-      e.preventDefault();
-      if (moveHistoryActive) {
-        moveHistoryActive = false;
-        moveApplied = false;
-      }
-      if (dragging) {
-        dragging = false;
-        dragMode = null;
-        activeDragCanonical = -1;
-        activeDragIsMirror = false;
-      }
-      history.undo();
-      return;
+    if (fpsInput) {
+      const updateFps = (e) => {
+        this.state.fps = parseInt(e.target.value) || 12;
+      };
+      fpsInput.addEventListener('change', updateFps);
+      fpsInput.addEventListener('input', updateFps);
     }
-    if (wantsRedo) {
-      e.preventDefault();
-      if (moveHistoryActive) {
-        moveHistoryActive = false;
-        moveApplied = false;
-      }
-      if (dragging) {
-        dragging = false;
-        dragMode = null;
-        activeDragCanonical = -1;
-        activeDragIsMirror = false;
-      }
-      history.redo();
+
+    // Onion skinning toggle
+    const onionToggle = document.getElementById('onionSkinToggle');
+    if (onionToggle) {
+      onionToggle.addEventListener('change', (e) => {
+        this.state.onionSkinning = e.target.checked;
+        this.render();
+      });
+    }
+  }
+
+  setTool(toolName) {
+    this.state.currentTool = toolName;
+    this.tools.setTool(toolName);
+  }
+
+  zoomBy(factor) {
+    const rect = this.canvas.getBoundingClientRect();
+    const centerX = rect.width / 2;
+    const centerY = rect.height / 2;
+    
+    const oldZoom = this.state.zoom;
+    const newZoom = Math.max(0.1, Math.min(10, oldZoom * factor));
+    
+    this.state.panX = centerX - (centerX - this.state.panX) * (newZoom / oldZoom);
+    this.state.panY = centerY - (centerY - this.state.panY) * (newZoom / oldZoom);
+    this.state.zoom = newZoom;
+    
+    this.updateZoomDisplay();
+    this.render();
+  }
+
+  resetView() {
+    this.centerView();
+  }
+
+  fitToScreen() {
+    const shapes = this.getCurrentShapes();
+    if (shapes.length === 0) {
+      this.fitCanvasInView();
       return;
     }
 
-    if ((e.key === "Delete" || e.key === "Backspace") && selectedIds.size > 0) {
-      const selectedIndices = getSelectedIndices();
-      const removalSet = new Set(selectedIndices);
-      selectedIndices.forEach((idx) => {
-        const primaryIdx = primaryIndexFor(idx);
-        const partnerIdx = getMirrorIndex(primaryIdx);
-        if (partnerIdx >= 0) removalSet.add(partnerIdx);
-      });
-      if (points.length - removalSet.size >= 3) {
-        if (!suppressHistory) history.record("Delete Vertices");
-        Array.from(removalSet)
-          .sort((a, b) => b - a)
-          .forEach((i) => {
-            removeIndexFromSelection(i);
-            points.splice(i, 1);
-          });
-        clearSelection();
-        rebuildIndex();
-        if (mirrorEnabled) rebuildMirrorPairs();
-        updateOutputs();
-        draw();
+    let minX = Infinity, minY = Infinity;
+    let maxX = -Infinity, maxY = -Infinity;
+
+    for (const shape of shapes) {
+      for (const v of shape.vertices) {
+        minX = Math.min(minX, v.x);
+        minY = Math.min(minY, v.y);
+        maxX = Math.max(maxX, v.x);
+        maxY = Math.max(maxY, v.y);
       }
     }
-  });
 
-  // Buttons
-  resetBtn.addEventListener("click", () => {
-    if (suppressHistory) return;
-    history.record("Reset Polygon");
-    setN(parseInt(nInput.value, 10));
-  });
-  nInput.addEventListener("change", () => {
-    if (suppressHistory) return;
-    history.record("Change Sides");
-    setN(parseInt(nInput.value, 10));
-  });
-  centerBtn.addEventListener("click", () => {
-    if (suppressHistory) return;
-    history.record("Center View");
-    pan.x = 0;
-    pan.y = 0;
-    zoom = 1;
-    draw();
-  });
-  mirrorChk.addEventListener("change", () => {
-    if (suppressHistory) return;
-    history.record("Toggle Mirror");
-    mirrorEnabled = mirrorChk.checked;
-    if (mirrorEnabled) {
-      rebuildMirrorPairs();
-      const primaries = new Set();
-      points.forEach((node, idx) => {
-        if (node.mirrorId != null && node.primary) primaries.add(idx);
-      });
-      if (primaries.size > 0) applyMirrorConstraints(primaries);
-    } else {
-      clearMirrorPairs();
+    const padding = 50;
+    const rect = this.canvas.getBoundingClientRect();
+    const width = maxX - minX;
+    const height = maxY - minY;
+    
+    if (width === 0 || height === 0) {
+      this.fitCanvasInView();
+      return;
     }
-    updateOutputs();
-    draw();
-  });
-  weightChk.addEventListener("change", () => {
-    if (suppressHistory) return;
-    history.record("Toggle Weights");
-    weightEnabled = weightChk.checked;
-  });
-  falloffInput.addEventListener("input", () => {
-    if (suppressHistory) return;
-    history.record("Change Falloff");
-    perHopFalloff = parseFloat(falloffInput.value);
-  });
-  hopsInput.addEventListener("change", () => {
-    if (suppressHistory) return;
-    history.record("Change Hops");
-    maxHops = Math.max(1, Math.min(32, parseInt(hopsInput.value || "3", 10)));
-    hopsInput.value = String(maxHops);
-  });
-
-  function trianglesFan() {
-    const N = points.length;
-    const tris = [];
-    for (let i = 1; i < N - 1; i++) tris.push([0, i, i + 1]);
-    return tris;
+    
+    const scaleX = (rect.width - padding * 2) / width;
+    const scaleY = (rect.height - padding * 2) / height;
+    const zoom = Math.min(scaleX, scaleY, 2);
+    
+    // Center on the shapes' center point
+    const shapeCenterX = (minX + maxX) / 2;
+    const shapeCenterY = (minY + maxY) / 2;
+    
+    this.state.zoom = zoom;
+    this.state.panX = rect.width / 2 - shapeCenterX * zoom;
+    this.state.panY = rect.height / 2 - shapeCenterY * zoom;
+    
+    this.updateZoomDisplay();
+    this.render();
   }
 
-  function round(v) {
-    return Math.round(v * 1000) / 1000;
+  getCurrentFrame() {
+    return this.frames.getCurrentFrame();
   }
 
-  function updateOutputs() {
-    const verts = points.map((p) => [round(p.x), round(p.y)]);
-    const tris = trianglesFan();
-    vertsOut.textContent = JSON.stringify(verts, null, 2);
-    trisOut.textContent = JSON.stringify(tris, null, 2);
-    canvas.dataset.n = String(points.length);
+  getCurrentLayers() {
+    const frame = this.getCurrentFrame();
+    return frame ? frame.layers : [];
   }
 
-  function copyText(txt) {
-    navigator.clipboard.writeText(txt).catch(() => {
-      // Fallback: create a temp textarea
-      const ta = document.createElement("textarea");
-      ta.value = txt;
-      document.body.appendChild(ta);
-      ta.select();
-      try {
-        document.execCommand("copy");
-      } catch (e) {}
-      document.body.removeChild(ta);
-    });
+  getCurrentLayer() {
+    const layers = this.getCurrentLayers();
+    const activeId = this.layers.activeLayerId;
+    return layers.find(l => l.id === activeId) || layers[0];
   }
 
-  exportBtn.addEventListener("click", () => {
-    const data = {
-      vertices: JSON.parse(vertsOut.textContent || "[]"),
-      triangles: JSON.parse(trisOut.textContent || "[]"),
+  getCurrentShapes() {
+    const layer = this.getCurrentLayer();
+    return layer ? layer.shapes : [];
+  }
+
+  render() {
+    const frame = this.getCurrentFrame();
+    const prevFrame = this.state.onionSkinning ? this.frames.getPreviousFrame() : null;
+    
+    this.renderer.render(frame, prevFrame);
+  }
+
+  saveHistory() {
+    const state = this.getState();
+    this.history.pushState(state);
+  }
+
+  getState() {
+    return {
+      frames: JSON.parse(JSON.stringify(this.frames.frames)),
+      currentFrameIndex: this.frames.currentFrameIndex,
+      activeLayerId: this.layers.activeLayerId,
+      selectedShapes: [...this.state.selectedShapes],
+      selectedVertices: [...this.state.selectedVertices]
     };
-    copyText(JSON.stringify(data, null, 2));
-  });
-  copyVertsBtn.addEventListener("click", () => copyText(vertsOut.textContent));
-  copyTrisBtn.addEventListener("click", () => copyText(trisOut.textContent));
+  }
 
-  // Self tests (basic invariants)
-  function log(line) {
-    testOut.textContent += (testOut.textContent ? "\n" : "") + line;
+  restoreState(state) {
+    this.frames.frames = state.frames;
+    this.frames.currentFrameIndex = state.currentFrameIndex;
+    this.layers.activeLayerId = state.activeLayerId;
+    this.state.selectedShapes = state.selectedShapes || [];
+    this.state.selectedVertices = state.selectedVertices || [];
+    
+    this.frames.updateUI();
+    this.layers.updateUI();
+    this.render();
   }
-  function clearTests() {
-    testOut.textContent = "";
+
+  toggleMirror() {
+    this.state.mirrorEnabled = !this.state.mirrorEnabled;
+    const toggle = document.getElementById('mirror-toggle');
+    if (toggle) toggle.checked = this.state.mirrorEnabled;
+    this.render();
   }
-  function assert(cond, msg) {
-    if (cond) {
-      log("✔ " + msg);
+
+  togglePlayback() {
+    if (this.playbackInterval) {
+      clearInterval(this.playbackInterval);
+      this.playbackInterval = null;
+      const playBtn = document.getElementById('play-btn');
+      if (playBtn) playBtn.textContent = '▶';
     } else {
-      log("✘ " + msg);
+      const delay = 1000 / this.state.fps;
+      this.playbackInterval = setInterval(() => {
+        this.frames.nextFrame();
+      }, delay);
+      const playBtn = document.getElementById('play-btn');
+      if (playBtn) playBtn.textContent = '⏸';
     }
   }
 
-  function approxEq(a, b, eps = 1e-6) {
-    return Math.abs(a - b) <= eps;
+  selectAll() {
+    const shapes = this.getCurrentShapes();
+    this.state.selectedShapes = shapes.map(s => s.id);
+    this.render();
   }
 
-  function runSelfTests() {
-    clearTests();
-    // Triangles fan size & indices
-    (function () {
-      const N = 6;
-      const tris = [];
-      for (let i = 1; i < N - 1; i++) tris.push([0, i, i + 1]);
-      assert(
-        tris.length === N - 2,
-        `triangles length == N-2 (${tris.length} == ${N - 2})`
-      );
-      assert(
-        JSON.stringify(tris[0]) === JSON.stringify([0, 1, 2]),
-        "first tri is [0,1,2]"
-      );
-      assert(
-        JSON.stringify(tris[tris.length - 1]) ===
-          JSON.stringify([0, N - 2, N - 1]),
-        "last tri is [0,N-2,N-1]"
-      );
-    })();
-
-    // world<->canvas roundtrip at default pan/zoom
-    (function () {
-      pan = { x: 0, y: 0 };
-      zoom = 1;
-      const p = { x: 123.456, y: -78.9 };
-      const q = worldToCanvas(p);
-      const r = canvasToWorld(q);
-      assert(
-        approxEq(p.x, r.x, 1e-9) && approxEq(p.y, r.y, 1e-9),
-        "world/canvas transforms round-trip"
-      );
-    })();
-
-    // Y-axis mirror: moving a point moves its partner with flipped X delta
-    (function () {
-      points = [createNode(100, 20), createNode(-100, 20, { primary: false }), createNode(0, -150)];
-      linkMirrorPair(0, 1);
-      rebuildIndex();
-      clearSelection();
-      addIndexToSelection(0);
-      mirrorEnabled = true;
-      weightEnabled = false;
-      moveSelectedBy(30, -10);
-      const a0 = points[0];
-      const a1 = points[1];
-      const cond1 = approxEq(a1.x, -a0.x) && approxEq(a1.y, a0.y);
-      assert(cond1, "mirror Y-axis preserves symmetry after move");
-    })();
-
-    // Box selection picks expected indices
-    (function () {
-      setN(4); // square
-      pan = { x: 0, y: 0 };
-      zoom = 1;
-      const p0 = worldToCanvas(points[0]);
-      const p1 = worldToCanvas(points[1]);
-      selectInScreenRect(
-        {
-          x1: Math.min(p0.x, p1.x) - 2,
-          y1: Math.min(p0.y, p1.y) - 2,
-          x2: Math.max(p0.x, p1.x) + 2,
-          y2: Math.max(p0.y, p1.y) + 2,
-        },
-        "replace"
-      );
-      const ok = selectedIds.has(points[0].id) && selectedIds.has(points[1].id);
-      assert(ok, "box select includes vertices inside rect");
-      setN(parseInt(nInput.value, 10));
-    })();
-
-    // Weighted move falloff per hop
-    (function () {
-      setN(8);
-      pan = { x: 0, y: 0 };
-      zoom = 1; // regular octagon roughly symmetric
-      clearSelection();
-      addIndexToSelection(0);
-      weightEnabled = true;
-      perHopFalloff = 0.5;
-      maxHops = 2;
-      const before = points.map((p) => ({ x: p.x, y: p.y }));
-      moveSelectedBy(10, 0);
-      const after = points;
-      // neighbors at distance 1 should move by ~5, distance 2 by ~2.5, others ~0
-      const d1 = Math.hypot(after[1].x - before[1].x, after[1].y - before[1].y);
-      const d7 = Math.hypot(after[7].x - before[7].x, after[7].y - before[7].y);
-      const d2 = Math.hypot(after[2].x - before[2].x, after[2].y - before[2].y);
-      const d6 = Math.hypot(after[6].x - before[6].x, after[6].y - before[6].y);
-      const d3 = Math.hypot(after[3].x - before[3].x, after[3].y - before[3].y);
-      const ok1 = Math.abs(d1 - 5) < 0.6 && Math.abs(d7 - 5) < 0.6;
-      const ok2 = Math.abs(d2 - 2.5) < 0.6 && Math.abs(d6 - 2.5) < 0.6;
-      const ok3 = d3 < 0.6; // beyond max hops
-      assert(ok1 && ok2 && ok3, "weighted falloff per hop works");
-    })();
-
-    log("Self-tests complete.");
+  deleteSelected() {
+    if (this.state.selectedVertices.length > 0) {
+      this.shapes.deleteSelectedVertices();
+    } else if (this.state.selectedShapes.length > 0) {
+      this.shapes.deleteSelectedShapes();
+    }
+    this.saveHistory();
+    this.render();
   }
-  runTestsBtn.addEventListener("click", runSelfTests);
 
-  // Init
-  setN(parseInt(nInput.value, 10));
-  centerBtn.click();
-  history.clear();
-
-  // Ensure full-bleed canvas sizing works on load
-  function fitCanvasToParent() {
-    const parent = canvas.parentElement;
-    canvas.style.height =
-      parent.clientHeight -
-      parent.querySelector(".toolbar").clientHeight +
-      "px";
+  duplicateSelected() {
+    if (this.state.selectedShapes.length > 0) {
+      this.shapes.duplicateSelected();
+      this.saveHistory();
+      this.render();
+    }
   }
-  window.addEventListener("resize", () => {
-    fitCanvasToParent();
-    resize();
-  });
-  setTimeout(() => {
-    fitCanvasToParent();
-    resize();
-  }, 0);
-})();
+
+  copy() {
+    if (this.state.selectedShapes.length > 0) {
+      const shapes = this.getCurrentShapes()
+        .filter(s => this.state.selectedShapes.includes(s.id));
+      this.state.clipboard = JSON.parse(JSON.stringify(shapes));
+    }
+  }
+
+  paste() {
+    if (this.state.clipboard && this.state.clipboard.length > 0) {
+      const layer = this.getCurrentLayer();
+      if (!layer) return;
+
+      const newIds = [];
+      for (const shape of this.state.clipboard) {
+        const newShape = JSON.parse(JSON.stringify(shape));
+        newShape.id = this.shapes.generateId();
+        // Offset pasted shapes
+        for (const v of newShape.vertices) {
+          v.x += 20;
+          v.y += 20;
+        }
+        layer.shapes.push(newShape);
+        newIds.push(newShape.id);
+      }
+      
+      this.state.selectedShapes = newIds;
+      this.saveHistory();
+      this.render();
+    }
+  }
+
+  cut() {
+    this.copy();
+    this.deleteSelected();
+  }
+
+  groupSelected() {
+    // For now, just mark as group - could be extended
+    console.log('Group functionality placeholder');
+  }
+
+  save() {
+    const data = {
+      version: 1,
+      state: this.getState()
+    };
+    localStorage.setItem('polygon-editor-save', JSON.stringify(data));
+    console.log('Project saved');
+  }
+
+  load() {
+    const saved = localStorage.getItem('polygon-editor-save');
+    if (saved) {
+      const data = JSON.parse(saved);
+      this.restoreState(data.state);
+      console.log('Project loaded');
+    }
+  }
+
+  cancelCurrentAction() {
+    // If pen tool has a path, close and create the shape
+    if (this.tools.toolState.currentPath && this.tools.toolState.currentPath.length >= 3) {
+      this.shapes.createFromPath(this.tools.toolState.currentPath);
+      this.saveHistory();
+    }
+    
+    // Clear tool state
+    this.tools.toolState = {};
+    this.state.previewPath = null;
+    this.state.previewPoint = null;
+    this.state.previewShape = null;
+    this.state.selectionBox = null;
+    
+    // Switch to select tool
+    this.setTool('select');
+    this.render();
+  }
+
+  cycleSelection(direction) {
+    const shapes = this.getCurrentShapes();
+    if (shapes.length === 0) return;
+
+    if (this.state.selectedShapes.length === 0) {
+      this.state.selectedShapes = [shapes[0].id];
+    } else {
+      const currentId = this.state.selectedShapes[0];
+      const currentIndex = shapes.findIndex(s => s.id === currentId);
+      let newIndex = (currentIndex + direction + shapes.length) % shapes.length;
+      this.state.selectedShapes = [shapes[newIndex].id];
+    }
+    this.render();
+  }
+
+  sendBackward() {
+    this.shapes.reorderSelected(-1);
+    this.saveHistory();
+    this.render();
+  }
+
+  bringForward() {
+    this.shapes.reorderSelected(1);
+    this.saveHistory();
+    this.render();
+  }
+}
+
+// Create global instance
+window.polygonEditor = new PolygonEditor();

@@ -2,91 +2,285 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Simple Web Sprite Editor</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Poly Studio - 2D Shape Editor</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <div class="app">
-      <div class="canvas-wrap">
-        <div class="toolbar">
-          <label
-            >Vertices (N):
-            <input id="nInput" type="number" min="3" step="1" value="8"
-          /></label>
-          <button id="resetBtn" title="Rebuild a regular N-gon">
-            Reset Circle
+      <!-- Left Toolbar -->
+      <aside class="toolbar-left">
+        <div class="tool-group">
+          <button class="tool-btn active" data-tool="select" title="Select (V)">
+            <svg viewBox="0 0 24 24"><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/></svg>
           </button>
-          <button id="centerBtn" title="Recenter view">Center</button>
-          <label><input type="checkbox" id="mirrorChk" /> Mirror Y-axis</label>
-          <label><input type="checkbox" id="weightChk" /> Weighted Move</label>
-          <label class="small"
-            >Falloff
-            <input
-              id="falloffInput"
-              type="range"
-              min="0"
-              max="1"
-              step="0.05"
-              value="0.5"
-          /></label>
-          <label class="small"
-            >Max hops
-            <input
-              id="hopsInput"
-              type="number"
-              min="1"
-              max="32"
-              value="3"
-              style="width: 54px"
-          /></label>
-          <button id="exportBtn" title="Copy both arrays as JSON">
-            Copy Arrays
+          <button class="tool-btn" data-tool="pen" title="Pen Tool (P)">
+            <svg viewBox="0 0 24 24"><path d="M20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83zM3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z"/></svg>
           </button>
-          <span class="small"
-            >Drag points • <strong>Drag empty = box select</strong> (Shift =
-            add) • Right/Middle drag = pan • Shift on empty = add point •
-            ⌫/Delete = remove selected</span
-          >
+          <button class="tool-btn" data-tool="draw" title="Freehand Draw (D)">
+            <svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75l11-11.03-3.75-3.75L3 17.25zM5.92 19H5v-.92l9.06-9.06.92.92L5.92 19zM20.71 5.63l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83c.39-.39.39-1.02 0-1.41z"/></svg>
+          </button>
+          <button class="tool-btn" data-tool="shape" title="Shape Tool (S)">
+            <svg viewBox="0 0 24 24"><polygon points="12,2 22,20 2,20"/></svg>
+          </button>
         </div>
-        <canvas id="canvas"></canvas>
-      </div>
+        <div class="tool-group">
+          <button class="tool-btn" data-tool="move" title="Move (G)">
+            <svg viewBox="0 0 24 24"><path d="M10 9h4V6h3l-5-5-5 5h3v3zm-1 1H6V7l-5 5 5 5v-3h3v-4zm14 2l-5-5v3h-3v4h3v3l5-5zm-9 3h-4v3H7l5 5 5-5h-3v-3z"/></svg>
+          </button>
+          <button class="tool-btn" data-tool="rotate" title="Rotate (R)">
+            <svg viewBox="0 0 24 24"><path d="M12 6v3l4-4-4-4v3c-4.42 0-8 3.58-8 8 0 1.57.46 3.03 1.24 4.26L6.7 14.8c-.45-.83-.7-1.79-.7-2.8 0-3.31 2.69-6 6-6zm6.76 1.74L17.3 9.2c.44.84.7 1.79.7 2.8 0 3.31-2.69 6-6 6v-3l-4 4 4 4v-3c4.42 0 8-3.58 8-8 0-1.57-.46-3.03-1.24-4.26z"/></svg>
+          </button>
+          <button class="tool-btn" data-tool="scale" title="Scale (E)">
+            <svg viewBox="0 0 24 24"><path d="M21 15h2v2h-2v-2zm0-4h2v2h-2v-2zm2 8h-2v2c1 0 2-1 2-2zM13 3h2v2h-2V3zm8 4h2v2h-2V7zm0-4v2h2c0-1-1-2-2-2zM1 7h2v2H1V7zm16-4h2v2h-2V3zm0 16h2v2h-2v-2zM3 3C2 3 1 4 1 5h2V3zm6 0h2v2H9V3zM5 3h2v2H5V3zm-4 8v8c0 1.1.9 2 2 2h12V11H1zm2 8l2.5-3.21 1.79 2.15 2.5-3.22L13 19H3z"/></svg>
+          </button>
+        </div>
+        <div class="tool-group">
+          <button class="tool-btn" data-tool="pan" title="Pan View (H)">
+            <svg viewBox="0 0 24 24"><path d="M23 5.5V20c0 2.2-1.8 4-4 4h-7.3c-1.08 0-2.1-.43-2.85-1.19L1 14.83s1.26-1.23 1.3-1.25c.22-.19.49-.29.79-.29.22 0 .42.06.6.16.04.01 4.31 2.46 4.31 2.46V4c0-.83.67-1.5 1.5-1.5S11 3.17 11 4v7h1V1.5c0-.83.67-1.5 1.5-1.5S15 .67 15 1.5V11h1V2.5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5V11h1V5.5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5z"/></svg>
+          </button>
+          <button class="tool-btn" data-tool="zoom" title="Zoom (Z)">
+            <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/><path d="M12 10h-2v2H9v-2H7V9h2V7h1v2h2v1z"/></svg>
+          </button>
+        </div>
+        <div class="tool-divider"></div>
+        <div class="tool-group">
+          <button class="action-btn" id="undoBtn" title="Undo (Ctrl+Z)">
+            <svg viewBox="0 0 24 24"><path d="M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z"/></svg>
+          </button>
+          <button class="action-btn" id="redoBtn" title="Redo (Ctrl+Shift+Z)">
+            <svg viewBox="0 0 24 24"><path d="M18.4 10.6C16.55 8.99 14.15 8 11.5 8c-4.65 0-8.58 3.03-9.96 7.22L3.9 16c1.05-3.19 4.05-5.5 7.6-5.5 1.95 0 3.73.72 5.12 1.88L13 16h9V7l-3.6 3.6z"/></svg>
+          </button>
+        </div>
+      </aside>
 
+      <!-- Main Canvas Area -->
+      <main class="canvas-area">
+        <!-- Top Toolbar -->
+        <div class="toolbar-top">
+          <div class="toolbar-section">
+            <label class="toolbar-label">
+              <input type="checkbox" id="gridToggle" checked />
+              <span>Grid</span>
+            </label>
+            <label class="toolbar-label">
+              <input type="checkbox" id="snapToggle" checked />
+              <span>Snap</span>
+            </label>
+            <label class="toolbar-label">
+              Grid Size:
+              <input type="number" id="gridSize" value="20" min="5" max="100" step="5" />
+            </label>
+          </div>
+          <div class="toolbar-section">
+            <label class="toolbar-label">
+              Canvas:
+              <select id="canvasSizeSelect">
+                <option value="320x240">320 × 240</option>
+                <option value="640x480">640 × 480</option>
+                <option value="800x600" selected>800 × 600</option>
+                <option value="1024x768">1024 × 768</option>
+                <option value="1280x720">1280 × 720 (HD)</option>
+                <option value="1920x1080">1920 × 1080 (FHD)</option>
+                <option value="custom">Custom...</option>
+              </select>
+            </label>
+            <label class="toolbar-label">
+              <input type="checkbox" id="mirrorToggle" />
+              <span>Mirror X</span>
+            </label>
+          </div>
+          <div class="toolbar-section">
+            <button class="btn" id="centerViewBtn">Center View</button>
+            <button class="btn" id="fitCanvasBtn">Fit Canvas</button>
+            <button class="btn" id="fitViewBtn">Fit All</button>
+            <span class="zoom-display" id="zoomDisplay">100%</span>
+            <span class="coord-display" id="coordDisplay">X: 0  Y: 0</span>
+          </div>
+        </div>
+
+        <!-- Canvas Container -->
+        <div class="canvas-container" id="canvasContainer">
+          <canvas id="editor-canvas"></canvas>
+        </div>
+
+        <!-- Timeline -->
+        <div class="timeline" id="timeline">
+          <div class="timeline-controls">
+            <button class="timeline-btn" id="playBtn" title="Play/Pause">
+              <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+            </button>
+            <button class="timeline-btn" id="stopBtn" title="Stop">
+              <svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12"/></svg>
+            </button>
+            <button class="timeline-btn" id="prevFrameBtn" title="Previous Frame">
+              <svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
+            </button>
+            <button class="timeline-btn" id="nextFrameBtn" title="Next Frame">
+              <svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+            </button>
+            <span class="frame-display" id="frameDisplay">Frame: 1 / 1</span>
+            <button class="timeline-btn" id="addFrameBtn" title="Add Frame">
+              <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+            </button>
+            <button class="timeline-btn" id="dupFrameBtn" title="Duplicate Frame">
+              <svg viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>
+            </button>
+            <button class="timeline-btn" id="delFrameBtn" title="Delete Frame">
+              <svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+            </button>
+            <label class="toolbar-label">
+              FPS:
+              <input type="number" id="fpsInput" value="12" min="1" max="60" />
+            </label>
+            <label class="toolbar-label">
+              <input type="checkbox" id="onionSkinToggle" />
+              <span>Onion Skin</span>
+            </label>
+          </div>
+          <div class="timeline-frames" id="timelineFrames">
+            <!-- Frames will be added here dynamically -->
+          </div>
+        </div>
+      </main>
+
+      <!-- Right Sidebar -->
       <aside class="sidebar">
-        <div class="panel">
-          <h3>Coordinate System</h3>
-          <div class="small">
-            Origin (0, 0) is the <strong>canvas center</strong>. +X is right, +Y
-            is up.
+        <!-- Tool Options Panel -->
+        <div class="panel" id="toolOptionsPanel">
+          <h3>Tool Options</h3>
+          <div id="toolOptions">
+            <!-- Dynamic tool options -->
           </div>
         </div>
+
+        <!-- Shape Panel -->
         <div class="panel">
-          <div class="copy-row">
-            <button id="copyVerts">Copy Vertices [N×2]</button>
+          <h3>Shape</h3>
+          <div class="panel-row">
+            <label>Vertices:</label>
+            <input type="number" id="vertexCount" value="6" min="3" max="128" />
+            <button class="btn-sm" id="createPolygonBtn">Create</button>
           </div>
-          <h3>Vertices [N × 2]</h3>
-          <pre id="vertsOut">[]</pre>
-        </div>
-        <div class="panel">
-          <div class="copy-row">
-            <button id="copyTris">Copy Triangles [(N−2) × 3]</button>
-          </div>
-          <h3>Triangles [(N−2) × 3]</h3>
-          <pre id="trisOut">[]</pre>
-          <div class="legend small">
-            Triangles are a fan: [0, i, i+1] for i = 1..N−2.
+          <div class="panel-row">
+            <button class="btn" id="subdivideBtn">Subdivide</button>
+            <button class="btn" id="simplifyBtn">Simplify</button>
           </div>
         </div>
+
+        <!-- Transform Panel -->
         <div class="panel">
-          <div class="copy-row">
-            <button id="runTests">Run Self-Tests</button>
+          <h3>Transform</h3>
+          <div class="transform-grid">
+            <label>X:</label>
+            <input type="number" id="transformX" value="0" step="1" />
+            <label>Y:</label>
+            <input type="number" id="transformY" value="0" step="1" />
+            <label>Rotation:</label>
+            <input type="number" id="transformRotation" value="0" step="1" />
+            <label>Scale:</label>
+            <input type="number" id="transformScale" value="100" step="1" />%
           </div>
-          <h3>Self-Test Output</h3>
-          <pre id="testOut">(no tests run yet)</pre>
+          <div class="panel-row">
+            <button class="btn" id="flipHBtn">Flip H</button>
+            <button class="btn" id="flipVBtn">Flip V</button>
+            <button class="btn" id="resetTransformBtn">Reset</button>
+          </div>
+        </div>
+
+        <!-- Layers Panel -->
+        <div class="panel">
+          <h3>Layers</h3>
+          <div class="layers-list" id="layersList">
+            <!-- Layers will be added dynamically -->
+          </div>
+          <div class="panel-row">
+            <button class="btn-sm" id="addLayerBtn">+ Layer</button>
+            <button class="btn-sm" id="delLayerBtn">- Layer</button>
+            <button class="btn-sm" id="mergeLayersBtn">Merge</button>
+          </div>
+        </div>
+
+        <!-- Export Panel -->
+        <div class="panel">
+          <h3>Export</h3>
+          <div class="copy-row">
+            <button class="btn" id="copyVertsBtn">Copy Vertices</button>
+            <button class="btn" id="copyTrisBtn">Copy Triangles</button>
+          </div>
+          <div class="copy-row">
+            <button class="btn" id="exportJsonBtn">Export JSON</button>
+            <button class="btn" id="exportAnimBtn">Export Animation</button>
+          </div>
+          <details class="output-details">
+            <summary>Vertices [N × 2]</summary>
+            <pre id="vertsOut">[]</pre>
+          </details>
+          <details class="output-details">
+            <summary>Triangles [(N−2) × 3]</summary>
+            <pre id="trisOut">[]</pre>
+          </details>
+        </div>
+
+        <!-- Settings Panel -->
+        <div class="panel collapsible">
+          <h3>Settings</h3>
+          <div class="panel-row">
+            <label>Stroke Width:</label>
+            <input type="number" id="strokeWidth" value="2" min="1" max="10" />
+          </div>
+          <div class="panel-row">
+            <label>Handle Size:</label>
+            <input type="number" id="handleSize" value="6" min="3" max="15" />
+          </div>
+          <div class="panel-row">
+            <label>Simplify Tolerance:</label>
+            <input type="number" id="simplifyTolerance" value="2" min="0.5" max="20" step="0.5" />
+          </div>
         </div>
       </aside>
     </div>
 
-    <script src="index.js"></script>
+    <!-- Context Menu -->
+    <div class="context-menu" id="contextMenu">
+      <div class="context-item" data-action="delete">Delete</div>
+      <div class="context-item" data-action="duplicate">Duplicate</div>
+      <div class="context-divider"></div>
+      <div class="context-item" data-action="bringFront">Bring to Front</div>
+      <div class="context-item" data-action="sendBack">Send to Back</div>
+      <div class="context-divider"></div>
+      <div class="context-item" data-action="subdivide">Subdivide Edge</div>
+      <div class="context-item" data-action="dissolve">Dissolve Vertex</div>
+    </div>
+
+    <!-- Modal for Shape Creation -->
+    <div class="modal" id="shapeModal">
+      <div class="modal-content">
+        <h3>Create Shape</h3>
+        <div class="modal-row">
+          <label>Shape Type:</label>
+          <select id="shapeType">
+            <option value="polygon">Regular Polygon</option>
+            <option value="star">Star</option>
+            <option value="rectangle">Rectangle</option>
+            <option value="ellipse">Ellipse</option>
+          </select>
+        </div>
+        <div class="modal-row" id="sidesRow">
+          <label>Sides:</label>
+          <input type="number" id="shapeSides" value="6" min="3" max="128" />
+        </div>
+        <div class="modal-row" id="starPointsRow" style="display:none">
+          <label>Inner Radius:</label>
+          <input type="number" id="starInnerRadius" value="50" min="10" max="90" />%
+        </div>
+        <div class="modal-actions">
+          <button class="btn" id="cancelShapeBtn">Cancel</button>
+          <button class="btn primary" id="confirmShapeBtn">Create</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="index.js"></script>
   </body>
 </html>
