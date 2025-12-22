@@ -90,6 +90,34 @@ export class ToolManager {
       onMouseDrag: (data) => this.shapeMouseDrag(data, 'polygon'),
       onMouseUp: (data) => this.shapeMouseUp(data, 'polygon')
     };
+
+    // Sculpt tools
+    this.tools['sculpt-grab'] = {
+      name: 'Sculpt Grab',
+      cursor: 'crosshair',
+      onMouseDown: (data) => this.sculptGrabMouseDown(data),
+      onMouseDrag: (data) => this.sculptGrabMouseDrag(data),
+      onMouseUp: (data) => this.sculptGrabMouseUp(data),
+      onMouseMove: (data) => this.sculptMouseMove(data)
+    };
+
+    this.tools['sculpt-push'] = {
+      name: 'Sculpt Push',
+      cursor: 'crosshair',
+      onMouseDown: (data) => this.sculptPushMouseDown(data),
+      onMouseDrag: (data) => this.sculptPushMouseDrag(data),
+      onMouseUp: (data) => this.sculptPushMouseUp(data),
+      onMouseMove: (data) => this.sculptMouseMove(data)
+    };
+
+    this.tools['sculpt-smooth'] = {
+      name: 'Sculpt Smooth',
+      cursor: 'crosshair',
+      onMouseDown: (data) => this.sculptSmoothMouseDown(data),
+      onMouseDrag: (data) => this.sculptSmoothMouseDrag(data),
+      onMouseUp: (data) => this.sculptSmoothMouseUp(data),
+      onMouseMove: (data) => this.sculptMouseMove(data)
+    };
   }
 
   setupEventListeners() {
@@ -106,7 +134,11 @@ export class ToolManager {
     // Clean up current tool
     this.finishCurrentAction();
     
+    // Clear brush position when switching tools
+    this.app.state.brushPosition = null;
+    
     this.currentTool = toolName;
+    this.app.state.currentTool = toolName;  // Keep state in sync
     this.toolState = {};
     
     // Update cursor
@@ -245,6 +277,20 @@ export class ToolManager {
         const dx = data.pos.x - startPos.x;
         const dy = data.pos.y - startPos.y;
         this.app.shapes.moveSelectedVerticesBy(dx, dy);
+        this.toolState.draggingVertex.startPos = { ...data.pos };
+      } else if (this.app.state.softSelectEnabled) {
+        // Soft selection mode - move nearby vertices with falloff
+        const dx = data.pos.x - startPos.x;
+        const dy = data.pos.y - startPos.y;
+        const state = this.app.state;
+        
+        this.app.shapes.moveVerticesWithFalloff(
+          startPos,
+          { x: dx, y: dy },
+          state.brushRadius / state.zoom,
+          state.brushStrength,
+          state.brushFalloff
+        );
         this.toolState.draggingVertex.startPos = { ...data.pos };
       } else {
         // Single vertex drag
@@ -655,6 +701,145 @@ export class ToolManager {
     
     this.toolState = {};
     this.app.state.previewShape = null;
+    this.app.render();
+  }
+
+  // Sculpt tool common mouse move (for brush visualization)
+  sculptMouseMove(data) {
+    this.app.state.brushPosition = { ...data.pos };
+    this.app.render();
+  }
+
+  // Sculpt Grab tool - grab and move vertices with falloff
+  sculptGrabMouseDown(data) {
+    const state = this.app.state;
+    this.toolState.sculptStart = { ...data.pos };
+    this.toolState.lastPos = { ...data.pos };
+    
+    // Store original positions of affected vertices
+    this.toolState.originalPositions = [];
+    const vertices = this.app.shapes.getVerticesInRadius(
+      data.pos, 
+      state.brushRadius / state.zoom
+    );
+    
+    for (const v of vertices) {
+      this.toolState.originalPositions.push({
+        shapeId: v.shapeId,
+        vertexIndex: v.vertexIndex,
+        originalX: v.vertex.x,
+        originalY: v.vertex.y,
+        distance: v.distance
+      });
+    }
+  }
+
+  sculptGrabMouseDrag(data) {
+    if (!this.toolState.sculptStart) return;
+    
+    const state = this.app.state;
+    const radius = state.brushRadius / state.zoom;
+    
+    // Calculate total delta from start
+    const totalDx = data.pos.x - this.toolState.sculptStart.x;
+    const totalDy = data.pos.y - this.toolState.sculptStart.y;
+    
+    // Apply movement with falloff based on original positions
+    const shapes = this.app.shapes.getShapes();
+    for (const orig of this.toolState.originalPositions) {
+      const shape = shapes.find(s => s.id === orig.shapeId);
+      if (shape) {
+        const v = shape.vertices[orig.vertexIndex];
+        const falloff = this.app.shapes.calculateFalloff(
+          orig.distance, 
+          radius, 
+          state.brushFalloff
+        );
+        
+        v.x = orig.originalX + totalDx * falloff * state.brushStrength;
+        v.y = orig.originalY + totalDy * falloff * state.brushStrength;
+      }
+    }
+    
+    this.app.state.brushPosition = { ...data.pos };
+    this.app.render();
+  }
+
+  sculptGrabMouseUp(data) {
+    if (this.toolState.originalPositions && this.toolState.originalPositions.length > 0) {
+      this.app.saveHistory();
+    }
+    this.toolState = {};
+    this.app.render();
+  }
+
+  // Sculpt Push tool - push vertices outward/inward
+  sculptPushMouseDown(data) {
+    this.toolState.sculpting = true;
+    this.toolState.lastPos = { ...data.pos };
+    this.app.state.brushPosition = { ...data.pos };
+  }
+
+  sculptPushMouseDrag(data) {
+    if (!this.toolState.sculpting) return;
+    
+    const state = this.app.state;
+    const radius = state.brushRadius / state.zoom;
+    
+    // Push vertices - Alt key for inward push
+    const inward = data.altKey;
+    this.app.shapes.pushVertices(
+      data.pos,
+      radius,
+      state.brushStrength * 0.5, // Reduce strength for smoother effect
+      state.brushFalloff,
+      inward
+    );
+    
+    this.toolState.lastPos = { ...data.pos };
+    this.app.state.brushPosition = { ...data.pos };
+    this.app.render();
+  }
+
+  sculptPushMouseUp(data) {
+    if (this.toolState.sculpting) {
+      this.app.saveHistory();
+    }
+    this.toolState = {};
+    this.app.render();
+  }
+
+  // Sculpt Smooth tool - smooth vertices
+  sculptSmoothMouseDown(data) {
+    this.toolState.sculpting = true;
+    this.toolState.lastPos = { ...data.pos };
+    this.app.state.brushPosition = { ...data.pos };
+  }
+
+  sculptSmoothMouseDrag(data) {
+    if (!this.toolState.sculpting) return;
+    
+    const state = this.app.state;
+    const radius = state.brushRadius / state.zoom;
+    
+    // Smooth vertices at brush position
+    this.app.shapes.smoothVerticesAtPoint(
+      data.pos,
+      radius,
+      state.brushStrength,
+      state.brushFalloff
+    );
+    
+    this.toolState.lastPos = { ...data.pos };
+    this.app.state.brushPosition = { ...data.pos };
+    this.app.render();
+  }
+
+  sculptSmoothMouseUp(data) {
+    if (this.toolState.sculpting) {
+      this.app.saveHistory();
+    }
+    this.toolState = {};
     this.app.render();
   }
 }

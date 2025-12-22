@@ -58,6 +58,10 @@ export class CanvasRenderer {
       this.renderSelectionBox(ctx, state.selectionBox);
     }
 
+    // Render brush cursor for sculpt tools
+    if (state.brushPosition && this.isSculptToolActive()) {
+      this.renderBrushCursor(ctx, state.brushPosition, state.brushRadius);
+    }
     ctx.restore();
   }
 
@@ -277,5 +281,58 @@ export class CanvasRenderer {
       x: point.x * state.zoom + state.panX,
       y: point.y * state.zoom + state.panY
     };
+  }
+
+  isSculptToolActive() {
+    const tool = this.app.state.currentTool;
+    return tool === 'sculpt-grab' || tool === 'sculpt-push' || tool === 'sculpt-smooth';
+  }
+
+  renderBrushCursor(ctx, position, radius) {
+    const screenPos = this.worldToScreen(position);
+    const state = this.app.state;
+    
+    // Draw brush circle
+    ctx.beginPath();
+    ctx.arc(screenPos.x, screenPos.y, radius, 0, Math.PI * 2);
+    
+    // Outer ring
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    
+    // Inner fill with falloff visualization
+    const gradient = ctx.createRadialGradient(
+      screenPos.x, screenPos.y, 0,
+      screenPos.x, screenPos.y, radius
+    );
+    
+    const toolColor = this.getBrushColor();
+    gradient.addColorStop(0, toolColor.replace(')', ', 0.3)').replace('rgb', 'rgba'));
+    gradient.addColorStop(0.7, toolColor.replace(')', ', 0.1)').replace('rgb', 'rgba'));
+    gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    
+    ctx.fillStyle = gradient;
+    ctx.fill();
+    
+    // Center dot
+    ctx.beginPath();
+    ctx.arc(screenPos.x, screenPos.y, 3, 0, Math.PI * 2);
+    ctx.fillStyle = 'white';
+    ctx.fill();
+  }
+
+  getBrushColor() {
+    const tool = this.app.state.currentTool;
+    switch (tool) {
+      case 'sculpt-grab':
+        return 'rgb(74, 158, 255)';  // Blue
+      case 'sculpt-push':
+        return 'rgb(255, 107, 107)'; // Red
+      case 'sculpt-smooth':
+        return 'rgb(0, 255, 136)';   // Green
+      default:
+        return 'rgb(255, 255, 255)'; // White
+    }
   }
 }

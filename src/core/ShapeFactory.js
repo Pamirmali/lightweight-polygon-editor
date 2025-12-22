@@ -667,4 +667,165 @@ export class ShapeFactory {
       layer.shapes.push(shape);
     }
   }
+
+  // Smooth/Relax selected shapes by averaging vertex positions with neighbors
+  smoothSelected(iterations = 1, factor = 0.5) {
+    const shapes = this.getShapes();
+
+    for (let iter = 0; iter < iterations; iter++) {
+      for (const shapeId of this.app.state.selectedShapes) {
+        const shape = shapes.find(s => s.id === shapeId);
+        if (!shape || shape.vertices.length < 3) continue;
+
+        const n = shape.vertices.length;
+        const newPositions = [];
+
+        // Calculate new positions based on neighbor averaging
+        for (let i = 0; i < n; i++) {
+          const prev = shape.vertices[(i - 1 + n) % n];
+          const curr = shape.vertices[i];
+          const next = shape.vertices[(i + 1) % n];
+
+          // Average of neighbors
+          const avgX = (prev.x + next.x) / 2;
+          const avgY = (prev.y + next.y) / 2;
+
+          // Blend between current position and average
+          newPositions.push({
+            x: curr.x + (avgX - curr.x) * factor,
+            y: curr.y + (avgY - curr.y) * factor
+          });
+        }
+
+        // Apply new positions
+        for (let i = 0; i < n; i++) {
+          shape.vertices[i].x = newPositions[i].x;
+          shape.vertices[i].y = newPositions[i].y;
+        }
+      }
+    }
+  }
+
+  // Calculate falloff value based on distance and type
+  calculateFalloff(distance, radius, falloffType) {
+    if (distance >= radius) return 0;
+    
+    const t = distance / radius; // 0 at center, 1 at edge
+    
+    switch (falloffType) {
+      case 'linear':
+        return 1 - t;
+      case 'sharp':
+        return 1 - t * t;
+      case 'constant':
+        return 1;
+      case 'smooth':
+      default:
+        // Smooth falloff using cosine interpolation
+        return (Math.cos(t * Math.PI) + 1) / 2;
+    }
+  }
+
+  // Move vertices near a point with falloff (for soft selection)
+  moveVerticesWithFalloff(centerPos, delta, radius, strength, falloffType) {
+    const shapes = this.getShapes();
+
+    for (const shape of shapes) {
+      for (const v of shape.vertices) {
+        const dist = Math.hypot(v.x - centerPos.x, v.y - centerPos.y);
+        const falloff = this.calculateFalloff(dist, radius, falloffType);
+        
+        if (falloff > 0) {
+          v.x += delta.x * falloff * strength;
+          v.y += delta.y * falloff * strength;
+        }
+      }
+    }
+  }
+
+  // Push vertices away from or toward a point (for sculpt push tool)
+  pushVertices(centerPos, radius, strength, falloffType, inward = false) {
+    const shapes = this.getShapes();
+    const direction = inward ? -1 : 1;
+
+    for (const shape of shapes) {
+      for (const v of shape.vertices) {
+        const dx = v.x - centerPos.x;
+        const dy = v.y - centerPos.y;
+        const dist = Math.hypot(dx, dy);
+        
+        if (dist === 0 || dist >= radius) continue;
+        
+        const falloff = this.calculateFalloff(dist, radius, falloffType);
+        
+        // Normalize direction and apply push
+        const pushAmount = falloff * strength * direction * 2;
+        v.x += (dx / dist) * pushAmount;
+        v.y += (dy / dist) * pushAmount;
+      }
+    }
+  }
+
+  // Smooth vertices near a point (for sculpt smooth tool)
+  smoothVerticesAtPoint(centerPos, radius, strength, falloffType) {
+    const shapes = this.getShapes();
+
+    for (const shape of shapes) {
+      const n = shape.vertices.length;
+      if (n < 3) continue;
+
+      // First pass: calculate which vertices are affected and their new positions
+      const adjustments = [];
+
+      for (let i = 0; i < n; i++) {
+        const v = shape.vertices[i];
+        const dist = Math.hypot(v.x - centerPos.x, v.y - centerPos.y);
+        const falloff = this.calculateFalloff(dist, radius, falloffType);
+
+        if (falloff > 0) {
+          const prev = shape.vertices[(i - 1 + n) % n];
+          const next = shape.vertices[(i + 1) % n];
+          
+          // Target position is average of neighbors
+          const targetX = (prev.x + next.x) / 2;
+          const targetY = (prev.y + next.y) / 2;
+          
+          adjustments.push({
+            index: i,
+            dx: (targetX - v.x) * falloff * strength,
+            dy: (targetY - v.y) * falloff * strength
+          });
+        }
+      }
+
+      // Second pass: apply adjustments
+      for (const adj of adjustments) {
+        shape.vertices[adj.index].x += adj.dx;
+        shape.vertices[adj.index].y += adj.dy;
+      }
+    }
+  }
+
+  // Get vertices within radius of a point
+  getVerticesInRadius(centerPos, radius) {
+    const result = [];
+    const shapes = this.getShapes();
+
+    for (const shape of shapes) {
+      for (let i = 0; i < shape.vertices.length; i++) {
+        const v = shape.vertices[i];
+        const dist = Math.hypot(v.x - centerPos.x, v.y - centerPos.y);
+        if (dist < radius) {
+          result.push({
+            shapeId: shape.id,
+            vertexIndex: i,
+            vertex: v,
+            distance: dist
+          });
+        }
+      }
+    }
+
+    return result;
+  }
 }

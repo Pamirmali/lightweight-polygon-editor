@@ -38,7 +38,13 @@ class PolygonEditor {
       previewShape: null,
       selectionBox: null,
       snapIndicator: null,
-      clipboard: null
+      clipboard: null,
+      // Sculpt settings
+      brushRadius: 50,
+      brushStrength: 0.5,
+      brushFalloff: 'smooth',  // 'smooth', 'linear', 'sharp', 'constant'
+      softSelectEnabled: false,
+      brushPosition: null  // Current brush position for visualization
     };
 
     // Create core systems
@@ -339,6 +345,58 @@ class PolygonEditor {
     if (mirrorLeftToRightBtn) {
       mirrorLeftToRightBtn.addEventListener('click', () => {
         this.shapes.mirrorLeftToRight();
+        this.saveHistory();
+        this.render();
+      });
+    }
+
+    // Sculpt panel controls
+    this.setupSculptPanel();
+  }
+
+  setupSculptPanel() {
+    // Brush radius slider
+    const brushRadiusInput = document.getElementById('brushRadius');
+    const brushRadiusValue = document.getElementById('brushRadiusValue');
+    if (brushRadiusInput) {
+      brushRadiusInput.addEventListener('input', (e) => {
+        this.state.brushRadius = parseInt(e.target.value);
+        if (brushRadiusValue) brushRadiusValue.textContent = e.target.value;
+        this.render();
+      });
+    }
+
+    // Brush strength slider
+    const brushStrengthInput = document.getElementById('brushStrength');
+    const brushStrengthValue = document.getElementById('brushStrengthValue');
+    if (brushStrengthInput) {
+      brushStrengthInput.addEventListener('input', (e) => {
+        this.state.brushStrength = parseInt(e.target.value) / 100;
+        if (brushStrengthValue) brushStrengthValue.textContent = e.target.value + '%';
+      });
+    }
+
+    // Brush falloff dropdown
+    const brushFalloffSelect = document.getElementById('brushFalloff');
+    if (brushFalloffSelect) {
+      brushFalloffSelect.addEventListener('change', (e) => {
+        this.state.brushFalloff = e.target.value;
+      });
+    }
+
+    // Soft selection toggle
+    const softSelectToggle = document.getElementById('softSelectToggle');
+    if (softSelectToggle) {
+      softSelectToggle.addEventListener('change', (e) => {
+        this.state.softSelectEnabled = e.target.checked;
+      });
+    }
+
+    // Smooth/Relax button
+    const smoothVerticesBtn = document.getElementById('smoothVerticesBtn');
+    if (smoothVerticesBtn) {
+      smoothVerticesBtn.addEventListener('click', () => {
+        this.shapes.smoothSelected();
         this.saveHistory();
         this.render();
       });
