@@ -333,6 +333,16 @@ class PolygonEditor {
         this.render();
       });
     }
+
+    // Mirror left to right button
+    const mirrorLeftToRightBtn = document.getElementById('mirrorLeftToRightBtn');
+    if (mirrorLeftToRightBtn) {
+      mirrorLeftToRightBtn.addEventListener('click', () => {
+        this.shapes.mirrorLeftToRight();
+        this.saveHistory();
+        this.render();
+      });
+    }
   }
 
   setupPanels() {

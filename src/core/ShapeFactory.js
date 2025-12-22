@@ -632,4 +632,39 @@ export class ShapeFactory {
       }
     }
   }
+
+  // Mirror shapes from left side to right side (around x=0 axis)
+  // Creates a mirrored copy of each shape on the opposite side
+  mirrorLeftToRight() {
+    const layer = this.app.getCurrentLayer();
+    if (!layer) return;
+
+    const shapes = this.getShapes();
+    const newShapes = [];
+
+    for (const shape of shapes) {
+      // Create a mirrored copy of the shape
+      const mirroredVertices = shape.vertices.map(v => ({
+        x: -v.x,  // Mirror around x=0
+        y: v.y
+      }));
+
+      // Reverse the vertex order to maintain correct winding
+      mirroredVertices.reverse();
+
+      const mirroredShape = {
+        id: this.generateId(),
+        type: shape.type,
+        vertices: mirroredVertices,
+        closed: shape.closed
+      };
+
+      newShapes.push(mirroredShape);
+    }
+
+    // Add all mirrored shapes to the layer
+    for (const shape of newShapes) {
+      layer.shapes.push(shape);
+    }
+  }
 }
