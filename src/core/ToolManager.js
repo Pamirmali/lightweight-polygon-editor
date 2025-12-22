@@ -187,13 +187,24 @@ export class ToolManager {
 
     if (hit) {
       if (hit.type === 'vertex') {
-        // Start vertex drag
-        this.toolState.draggingVertex = {
-          shapeId: hit.shapeId,
-          vertexIndex: hit.vertexIndex,
-          startPos: { ...data.pos }
-        };
-        this.app.shapes.selectVertex(hit.shapeId, hit.vertexIndex, data.shiftKey);
+        const vertexKey = `${hit.shapeId}:${hit.vertexIndex}`;
+        const isAlreadySelected = this.app.state.selectedVertices.includes(vertexKey);
+        
+        // If the vertex is already selected and we have multiple selected vertices,
+        // we'll drag all selected vertices together
+        if (isAlreadySelected && this.app.state.selectedVertices.length > 1) {
+          this.toolState.draggingMultipleVertices = {
+            startPos: { ...data.pos }
+          };
+        } else {
+          // Start single vertex drag (or select new vertex)
+          this.toolState.draggingVertex = {
+            shapeId: hit.shapeId,
+            vertexIndex: hit.vertexIndex,
+            startPos: { ...data.pos }
+          };
+          this.app.shapes.selectVertex(hit.shapeId, hit.vertexIndex, data.shiftKey);
+        }
       } else if (hit.type === 'shape') {
         // Select shape
         if (!data.shiftKey && !this.app.state.selectedShapes.includes(hit.shapeId)) {
@@ -219,11 +230,26 @@ export class ToolManager {
   }
 
   selectMouseDrag(data) {
-    if (this.toolState.draggingVertex) {
-      const { shapeId, vertexIndex, startPos } = this.toolState.draggingVertex;
+    if (this.toolState.draggingMultipleVertices) {
+      // Drag all selected vertices together
+      const { startPos } = this.toolState.draggingMultipleVertices;
       const dx = data.pos.x - startPos.x;
       const dy = data.pos.y - startPos.y;
-      this.app.shapes.moveVertex(shapeId, vertexIndex, data.pos);
+      this.app.shapes.moveSelectedVerticesBy(dx, dy);
+      this.toolState.draggingMultipleVertices.startPos = { ...data.pos };
+      this.app.render();
+    } else if (this.toolState.draggingVertex) {
+      const { shapeId, vertexIndex, startPos } = this.toolState.draggingVertex;
+      // If we have multiple selected vertices, move them all together
+      if (this.app.state.selectedVertices.length > 1) {
+        const dx = data.pos.x - startPos.x;
+        const dy = data.pos.y - startPos.y;
+        this.app.shapes.moveSelectedVerticesBy(dx, dy);
+        this.toolState.draggingVertex.startPos = { ...data.pos };
+      } else {
+        // Single vertex drag
+        this.app.shapes.moveVertex(shapeId, vertexIndex, data.pos);
+      }
       this.app.render();
     } else if (this.toolState.draggingShape) {
       const { startPos, shapes } = this.toolState.draggingShape;
@@ -241,7 +267,7 @@ export class ToolManager {
   }
 
   selectMouseUp(data) {
-    if (this.toolState.draggingVertex || this.toolState.draggingShape) {
+    if (this.toolState.draggingVertex || this.toolState.draggingShape || this.toolState.draggingMultipleVertices) {
       this.app.saveHistory();
     }
     

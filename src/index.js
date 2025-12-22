@@ -279,6 +279,20 @@ class PolygonEditor {
       });
     }
 
+    // Load default shape button (rounded square with 100 vertices)
+    const loadDefaultShapeBtn = document.getElementById('loadDefaultShapeBtn');
+    if (loadDefaultShapeBtn) {
+      loadDefaultShapeBtn.addEventListener('click', () => {
+        const rect = this.canvas.getBoundingClientRect();
+        const cx = (rect.width / 2 - this.state.panX) / this.state.zoom;
+        const cy = (rect.height / 2 - this.state.panY) / this.state.zoom;
+        // Create a rounded square with 100 vertices, size 200, corner radius 30
+        this.shapes.createRoundedSquare(cx, cy, 200, 30, 100);
+        this.saveHistory();
+        this.render();
+      });
+    }
+
     // Shape modification buttons
     const subdivideBtn = document.getElementById('subdivideBtn');
     const simplifyBtn = document.getElementById('simplifyBtn');

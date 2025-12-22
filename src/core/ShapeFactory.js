@@ -79,6 +79,106 @@ export class ShapeFactory {
     return shape;
   }
 
+  // Create a rounded square/rectangle with specified number of vertices
+  createRoundedSquare(cx, cy, size, cornerRadius, totalVertices = 100) {
+    const vertices = [];
+    const halfSize = size / 2;
+    
+    // Clamp corner radius to max possible (half of size)
+    const r = Math.min(cornerRadius, halfSize);
+    
+    // We have 4 corners, each needs vertices for the arc
+    // and 4 straight edges
+    // Distribute vertices: corners get more due to curvature
+    const verticesPerCorner = Math.floor(totalVertices / 4);
+    const verticesPerStraightEdge = Math.floor((totalVertices - verticesPerCorner * 4) / 4);
+    
+    // Actually, let's distribute evenly along the perimeter for smoothness
+    // Total perimeter = 4 * (size - 2*r) + 2 * PI * r (4 quarter circles = 1 full circle)
+    const straightLength = (halfSize - r) * 2;
+    const cornerLength = (Math.PI * r) / 2; // quarter circle arc length
+    const totalLength = 4 * straightLength + 4 * cornerLength;
+    
+    // Define the 4 corners (center points of corner arcs)
+    const corners = [
+      { x: cx + halfSize - r, y: cy - halfSize + r, startAngle: -Math.PI / 2, endAngle: 0 },        // top-right
+      { x: cx + halfSize - r, y: cy + halfSize - r, startAngle: 0, endAngle: Math.PI / 2 },          // bottom-right
+      { x: cx - halfSize + r, y: cy + halfSize - r, startAngle: Math.PI / 2, endAngle: Math.PI },    // bottom-left
+      { x: cx - halfSize + r, y: cy - halfSize + r, startAngle: Math.PI, endAngle: 3 * Math.PI / 2 } // top-left
+    ];
+    
+    // Generate vertices by walking along the perimeter
+    for (let i = 0; i < totalVertices; i++) {
+      const t = i / totalVertices; // 0 to 1 around the shape
+      const perimeterPos = t * totalLength;
+      
+      let accumulated = 0;
+      let point = null;
+      
+      for (let side = 0; side < 4 && !point; side++) {
+        // Straight edge before corner
+        const edgeStart = accumulated;
+        const edgeEnd = accumulated + straightLength;
+        
+        if (perimeterPos >= edgeStart && perimeterPos < edgeEnd) {
+          const edgeT = (perimeterPos - edgeStart) / straightLength;
+          
+          if (side === 0) { // top edge (left to right)
+            point = { 
+              x: cx - halfSize + r + edgeT * straightLength, 
+              y: cy - halfSize 
+            };
+          } else if (side === 1) { // right edge (top to bottom)
+            point = { 
+              x: cx + halfSize, 
+              y: cy - halfSize + r + edgeT * straightLength 
+            };
+          } else if (side === 2) { // bottom edge (right to left)
+            point = { 
+              x: cx + halfSize - r - edgeT * straightLength, 
+              y: cy + halfSize 
+            };
+          } else { // left edge (bottom to top)
+            point = { 
+              x: cx - halfSize, 
+              y: cy + halfSize - r - edgeT * straightLength 
+            };
+          }
+        }
+        accumulated = edgeEnd;
+        
+        // Corner arc
+        const cornerStart = accumulated;
+        const cornerEnd = accumulated + cornerLength;
+        
+        if (perimeterPos >= cornerStart && perimeterPos < cornerEnd && !point) {
+          const cornerT = (perimeterPos - cornerStart) / cornerLength;
+          const corner = corners[side];
+          const angle = corner.startAngle + cornerT * (corner.endAngle - corner.startAngle);
+          point = {
+            x: corner.x + Math.cos(angle) * r,
+            y: corner.y + Math.sin(angle) * r
+          };
+        }
+        accumulated = cornerEnd;
+      }
+      
+      if (point) {
+        vertices.push(point);
+      }
+    }
+
+    const shape = {
+      id: this.generateId(),
+      type: 'roundedSquare',
+      vertices,
+      closed: true
+    };
+
+    this.addShape(shape);
+    return shape;
+  }
+
   // Create from freehand path
   createFreehand(points) {
     if (points.length < 3) return null;
@@ -219,13 +319,19 @@ export class ShapeFactory {
 
   selectInBox(minX, minY, maxX, maxY) {
     const shapes = this.getShapes();
+    // Select individual vertices within the box
     for (const shape of shapes) {
-      for (const v of shape.vertices) {
+      for (let i = 0; i < shape.vertices.length; i++) {
+        const v = shape.vertices[i];
         if (v.x >= minX && v.x <= maxX && v.y >= minY && v.y <= maxY) {
+          const key = `${shape.id}:${i}`;
+          if (!this.app.state.selectedVertices.includes(key)) {
+            this.app.state.selectedVertices.push(key);
+          }
+          // Also add the shape to selectedShapes for visual feedback
           if (!this.app.state.selectedShapes.includes(shape.id)) {
             this.app.state.selectedShapes.push(shape.id);
           }
-          break;
         }
       }
     }
@@ -238,6 +344,20 @@ export class ShapeFactory {
     if (shape && shape.vertices[vertexIndex]) {
       shape.vertices[vertexIndex].x = newPos.x;
       shape.vertices[vertexIndex].y = newPos.y;
+    }
+  }
+
+  // Move all selected vertices by a delta
+  moveSelectedVerticesBy(dx, dy) {
+    const shapes = this.getShapes();
+    for (const key of this.app.state.selectedVertices) {
+      const [shapeId, indexStr] = key.split(':');
+      const index = parseInt(indexStr);
+      const shape = shapes.find(s => s.id === shapeId);
+      if (shape && shape.vertices[index]) {
+        shape.vertices[index].x += dx;
+        shape.vertices[index].y += dy;
+      }
     }
   }
 
