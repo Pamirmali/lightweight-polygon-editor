@@ -44,7 +44,15 @@ class PolygonEditor {
       brushStrength: 0.5,
       brushFalloff: 'smooth',  // 'smooth', 'linear', 'sharp', 'constant'
       softSelectEnabled: false,
-      brushPosition: null  // Current brush position for visualization
+      brushPosition: null,  // Current brush position for visualization
+      // Tweening settings
+      tweenEnabled: true,
+      tweenSteps: 10,  // Number of interpolation steps between keyframes
+      tweenEasing: 'easeInOutQuad',
+      // Playback state
+      isPlaying: false,
+      playbackPosition: 0,  // Float: frame index + sub-frame progress (e.g., 0.5 = halfway between frame 0 and 1)
+      interpolatedFrame: null  // Cached interpolated frame for rendering during playback
     };
 
     // Create core systems
@@ -461,20 +469,24 @@ class PolygonEditor {
     
     if (stopBtn) {
       stopBtn.addEventListener('click', () => {
-        if (this.playbackInterval) {
-          clearInterval(this.playbackInterval);
-          this.playbackInterval = null;
-        }
+        this.stopPlayback();
+        this.state.playbackPosition = 0;
         this.frames.goToFrame(0);
       });
     }
     
     if (prevFrameBtn) {
-      prevFrameBtn.addEventListener('click', () => this.frames.previousFrame());
+      prevFrameBtn.addEventListener('click', () => {
+        if (this.state.isPlaying) this.stopPlayback();
+        this.frames.previousFrame();
+      });
     }
     
     if (nextFrameBtn) {
-      nextFrameBtn.addEventListener('click', () => this.frames.nextFrame());
+      nextFrameBtn.addEventListener('click', () => {
+        if (this.state.isPlaying) this.stopPlayback();
+        this.frames.nextFrame();
+      });
     }
 
     if (fpsInput) {
@@ -491,6 +503,31 @@ class PolygonEditor {
       onionToggle.addEventListener('change', (e) => {
         this.state.onionSkinning = e.target.checked;
         this.render();
+      });
+    }
+
+    // Tweening controls
+    const tweenToggle = document.getElementById('tweenToggle');
+    if (tweenToggle) {
+      tweenToggle.addEventListener('change', (e) => {
+        this.state.tweenEnabled = e.target.checked;
+      });
+    }
+
+    const tweenStepsInput = document.getElementById('tweenSteps');
+    if (tweenStepsInput) {
+      tweenStepsInput.addEventListener('change', (e) => {
+        this.state.tweenSteps = parseInt(e.target.value) || 10;
+      });
+      tweenStepsInput.addEventListener('input', (e) => {
+        this.state.tweenSteps = parseInt(e.target.value) || 10;
+      });
+    }
+
+    const tweenEasingSelect = document.getElementById('tweenEasing');
+    if (tweenEasingSelect) {
+      tweenEasingSelect.addEventListener('change', (e) => {
+        this.state.tweenEasing = e.target.value;
       });
     }
   }
@@ -586,7 +623,8 @@ class PolygonEditor {
   }
 
   render() {
-    const frame = this.getCurrentFrame();
+    // During playback with tweening, use the interpolated frame if available
+    const frame = this.state.interpolatedFrame || this.getCurrentFrame();
     const prevFrame = this.state.onionSkinning ? this.frames.getPreviousFrame() : null;
     
     this.renderer.render(frame, prevFrame);
@@ -627,19 +665,122 @@ class PolygonEditor {
   }
 
   togglePlayback() {
+    if (this.state.isPlaying) {
+      // Stop playback
+      this.stopPlayback();
+    } else {
+      // Start playback
+      this.startPlayback();
+    }
+  }
+
+  startPlayback() {
+    if (this.frames.frames.length < 2) {
+      // Need at least 2 frames for animation
+      return;
+    }
+
+    this.state.isPlaying = true;
+    this.state.playbackPosition = this.frames.currentFrameIndex;
+    
+    const playBtn = document.getElementById('playBtn');
+    if (playBtn) playBtn.classList.add('playing');
+
+    // Calculate timing
+    // If tweening is enabled, we interpolate between frames
+    // Total steps per keyframe transition = tweenSteps
+    // FPS controls overall speed
+    
+    const updatePlayback = () => {
+      if (!this.state.isPlaying) return;
+
+      const totalFrames = this.frames.frames.length;
+      const tweenEnabled = this.state.tweenEnabled;
+      const tweenSteps = this.state.tweenSteps;
+      
+      // Calculate increment per tick
+      // With tweening: move 1/tweenSteps of a frame per tick
+      // Without tweening: move 1 frame per tick
+      const increment = tweenEnabled ? (1 / tweenSteps) : 1;
+      
+      this.state.playbackPosition += increment;
+      
+      // Loop back to start
+      if (this.state.playbackPosition >= totalFrames) {
+        this.state.playbackPosition = 0;
+      }
+
+      // Update the interpolated frame for rendering
+      if (tweenEnabled && totalFrames >= 2) {
+        this.updateInterpolatedFrame();
+      } else {
+        // No tweening - just show the current keyframe
+        this.frames.currentFrameIndex = Math.floor(this.state.playbackPosition);
+        this.state.interpolatedFrame = null;
+      }
+
+      this.render();
+      
+      // Update frame display
+      const frameDisplay = document.getElementById('frameDisplay');
+      if (frameDisplay) {
+        const currentFrame = Math.floor(this.state.playbackPosition) + 1;
+        const subFrame = this.state.playbackPosition % 1;
+        if (tweenEnabled && subFrame > 0.01) {
+          frameDisplay.textContent = `Frame: ${currentFrame}.${Math.round(subFrame * 10)} / ${totalFrames}`;
+        } else {
+          frameDisplay.textContent = `Frame: ${currentFrame} / ${totalFrames}`;
+        }
+      }
+    };
+
+    // Use requestAnimationFrame for smoother animation, but control speed with fps
+    const delay = 1000 / this.state.fps;
+    this.playbackInterval = setInterval(updatePlayback, delay);
+  }
+
+  stopPlayback() {
+    this.state.isPlaying = false;
+    this.state.interpolatedFrame = null;
+    
     if (this.playbackInterval) {
       clearInterval(this.playbackInterval);
       this.playbackInterval = null;
-      const playBtn = document.getElementById('play-btn');
-      if (playBtn) playBtn.textContent = '▶';
-    } else {
-      const delay = 1000 / this.state.fps;
-      this.playbackInterval = setInterval(() => {
-        this.frames.nextFrame();
-      }, delay);
-      const playBtn = document.getElementById('play-btn');
-      if (playBtn) playBtn.textContent = '⏸';
     }
+
+    const playBtn = document.getElementById('playBtn');
+    if (playBtn) playBtn.classList.remove('playing');
+
+    // Snap to nearest keyframe
+    this.frames.currentFrameIndex = Math.floor(this.state.playbackPosition);
+    this.frames.updateUI();
+    this.render();
+  }
+
+  updateInterpolatedFrame() {
+    const position = this.state.playbackPosition;
+    const currentIndex = Math.floor(position);
+    const nextIndex = (currentIndex + 1) % this.frames.frames.length;
+    const t = position - currentIndex; // Progress between frames (0 to 1)
+
+    if (t < 0.001) {
+      // At a keyframe, no interpolation needed
+      this.state.interpolatedFrame = null;
+      this.frames.currentFrameIndex = currentIndex;
+      return;
+    }
+
+    const startFrame = this.frames.frames[currentIndex];
+    const endFrame = this.frames.frames[nextIndex];
+    
+    // Apply easing to the interpolation factor
+    const easingFn = this.frames.constructor.easing[this.state.tweenEasing] || 
+                     this.frames.constructor.easing.linear;
+    const easedT = easingFn(t);
+
+    // Create interpolated frame
+    this.state.interpolatedFrame = this.frames.createInterpolatedFrame(startFrame, endFrame, easedT);
+    this.frames.currentFrameIndex = currentIndex;
   }
 
   selectAll() {

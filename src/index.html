@@ -148,6 +148,30 @@
               <input type="checkbox" id="onionSkinToggle" />
               <span>Onion Skin</span>
             </label>
+            <div class="toolbar-divider-v"></div>
+            <label class="toolbar-label">
+              <input type="checkbox" id="tweenToggle" checked />
+              <span>Tween</span>
+            </label>
+            <label class="toolbar-label">
+              Steps:
+              <input type="number" id="tweenSteps" value="10" min="2" max="60" style="width: 50px;" title="Interpolation steps between keyframes" />
+            </label>
+            <label class="toolbar-label">
+              Easing:
+              <select id="tweenEasing" style="width: 100px;">
+                <option value="linear">Linear</option>
+                <option value="easeInQuad">Ease In</option>
+                <option value="easeOutQuad">Ease Out</option>
+                <option value="easeInOutQuad" selected>Ease In-Out</option>
+                <option value="easeInCubic">Ease In Cubic</option>
+                <option value="easeOutCubic">Ease Out Cubic</option>
+                <option value="easeInOutCubic">Ease In-Out Cubic</option>
+                <option value="easeInElastic">Elastic In</option>
+                <option value="easeOutElastic">Elastic Out</option>
+                <option value="easeOutBounce">Bounce</option>
+              </select>
+            </label>
           </div>
           <div class="timeline-frames" id="timelineFrames">
             <!-- Frames will be added here dynamically -->
