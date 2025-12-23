@@ -33,6 +33,11 @@ export class CanvasRenderer {
       this.renderMirrorLine(ctx, width, height);
     }
 
+    // Render reference image (behind everything else)
+    if (state.referenceImage && state.referenceImage.image && state.referenceImage.visible) {
+      this.renderReferenceImage(ctx, state.referenceImage);
+    }
+
     // Render onion skin (previous frame)
     if (prevFrame) {
       this.renderFrame(ctx, prevFrame, 0.3, '#ff6b6b');
@@ -334,5 +339,34 @@ export class CanvasRenderer {
       default:
         return 'rgb(255, 255, 255)'; // White
     }
+  }
+
+  renderReferenceImage(ctx, refImage) {
+    const state = this.app.state;
+    
+    // Convert world coordinates to screen coordinates
+    const screenX = refImage.x * state.zoom + state.panX;
+    const screenY = refImage.y * state.zoom + state.panY;
+    const screenWidth = refImage.width * state.zoom;
+    const screenHeight = refImage.height * state.zoom;
+    
+    // Save context and apply opacity
+    ctx.save();
+    ctx.globalAlpha = refImage.opacity;
+    
+    // Draw the image
+    ctx.drawImage(refImage.image, screenX, screenY, screenWidth, screenHeight);
+    
+    // Draw a subtle border when not locked (indicating it can be moved)
+    if (!refImage.locked) {
+      ctx.globalAlpha = 0.5;
+      ctx.strokeStyle = '#4a9eff';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([5, 5]);
+      ctx.strokeRect(screenX, screenY, screenWidth, screenHeight);
+      ctx.setLineDash([]);
+    }
+    
+    ctx.restore();
   }
 }

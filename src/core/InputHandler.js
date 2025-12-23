@@ -6,6 +6,8 @@ export class InputHandler {
     this.isDrawing = false;
     this.isDragging = false;
     this.isPanning = false;
+    this.isDraggingRefImage = false;
+    this.refImageDragStart = null;
     this.lastMousePos = { x: 0, y: 0 };
     this.dragStart = { x: 0, y: 0 };
     this.selectionStart = null;
@@ -84,6 +86,19 @@ export class InputHandler {
 
     // Left click
     if (e.button === 0) {
+      // Check if clicking on reference image (when not locked and select tool is active)
+      if (this.isClickOnRefImage(pos) && !this.app.state.referenceImage.locked) {
+        this.isDraggingRefImage = true;
+        this.refImageDragStart = {
+          mouseX: pos.x,
+          mouseY: pos.y,
+          imageX: this.app.state.referenceImage.x,
+          imageY: this.app.state.referenceImage.y
+        };
+        this.canvas.style.cursor = 'move';
+        return;
+      }
+
       this.isDrawing = true;
       this.dragStart = { ...snappedPos };
       this.app.events.emit('input:mousedown', {
@@ -94,6 +109,16 @@ export class InputHandler {
         altKey: e.altKey
       });
     }
+  }
+
+  isClickOnRefImage(pos) {
+    const ref = this.app.state.referenceImage;
+    if (!ref || !ref.image || !ref.visible) return false;
+    
+    return pos.x >= ref.x && 
+           pos.x <= ref.x + ref.width &&
+           pos.y >= ref.y && 
+           pos.y <= ref.y + ref.height;
   }
 
   handleMouseMove(e) {
@@ -110,6 +135,21 @@ export class InputHandler {
       this.app.state.panX += dx;
       this.app.state.panY += dy;
       this.lastMousePos = { x: e.clientX, y: e.clientY };
+      this.app.render();
+      return;
+    }
+
+    // Dragging reference image
+    if (this.isDraggingRefImage && this.refImageDragStart) {
+      const dx = pos.x - this.refImageDragStart.mouseX;
+      const dy = pos.y - this.refImageDragStart.mouseY;
+      this.app.state.referenceImage.x = this.refImageDragStart.imageX + dx;
+      this.app.state.referenceImage.y = this.refImageDragStart.imageY + dy;
+      // Update position inputs in UI
+      const refImageX = document.getElementById('refImageX');
+      const refImageY = document.getElementById('refImageY');
+      if (refImageX) refImageX.value = Math.round(this.app.state.referenceImage.x);
+      if (refImageY) refImageY.value = Math.round(this.app.state.referenceImage.y);
       this.app.render();
       return;
     }
@@ -145,6 +185,13 @@ export class InputHandler {
       return;
     }
 
+    if (this.isDraggingRefImage) {
+      this.isDraggingRefImage = false;
+      this.refImageDragStart = null;
+      this.canvas.style.cursor = 'default';
+      return;
+    }
+
     if (this.isDrawing) {
       this.isDrawing = false;
       this.app.events.emit('input:mouseup', {
@@ -161,6 +208,11 @@ export class InputHandler {
   handleMouseLeave(e) {
     if (this.isDrawing) {
       this.handleMouseUp(e);
+    }
+    if (this.isDraggingRefImage) {
+      this.isDraggingRefImage = false;
+      this.refImageDragStart = null;
+      this.canvas.style.cursor = 'default';
     }
     this.isPanning = false;
   }

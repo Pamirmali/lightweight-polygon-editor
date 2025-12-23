@@ -52,7 +52,21 @@ class PolygonEditor {
       // Playback state
       isPlaying: false,
       playbackPosition: 0,  // Float: frame index + sub-frame progress (e.g., 0.5 = halfway between frame 0 and 1)
-      interpolatedFrame: null  // Cached interpolated frame for rendering during playback
+      interpolatedFrame: null,  // Cached interpolated frame for rendering during playback
+      // Reference image
+      referenceImage: {
+        image: null,
+        x: 0,
+        y: 0,
+        width: 0,
+        height: 0,
+        originalWidth: 0,
+        originalHeight: 0,
+        scale: 1,
+        opacity: 0.5,
+        visible: true,
+        locked: false
+      }
     };
 
     // Create core systems
@@ -528,6 +542,136 @@ class PolygonEditor {
     if (tweenEasingSelect) {
       tweenEasingSelect.addEventListener('change', (e) => {
         this.state.tweenEasing = e.target.value;
+      });
+    }
+
+    // Reference Image controls
+    this.setupReferenceImagePanel();
+  }
+
+  setupReferenceImagePanel() {
+    const refImageInput = document.getElementById('refImageInput');
+    const loadRefImageBtn = document.getElementById('loadRefImageBtn');
+    const clearRefImageBtn = document.getElementById('clearRefImageBtn');
+    const refImageOpacity = document.getElementById('refImageOpacity');
+    const refImageOpacityValue = document.getElementById('refImageOpacityValue');
+    const refImageScale = document.getElementById('refImageScale');
+    const refImageScaleValue = document.getElementById('refImageScaleValue');
+    const refImageX = document.getElementById('refImageX');
+    const refImageY = document.getElementById('refImageY');
+    const refImageLocked = document.getElementById('refImageLocked');
+    const refImageControls = document.getElementById('refImageControls');
+    const refImageScaleRow = document.getElementById('refImageScaleRow');
+    const refImagePositionRow = document.getElementById('refImagePositionRow');
+    const refImageOptionsRow = document.getElementById('refImageOptionsRow');
+
+    const showControls = () => {
+      if (refImageControls) refImageControls.style.display = 'flex';
+      if (refImageScaleRow) refImageScaleRow.style.display = 'flex';
+      if (refImagePositionRow) refImagePositionRow.style.display = 'flex';
+      if (refImageOptionsRow) refImageOptionsRow.style.display = 'flex';
+    };
+
+    const hideControls = () => {
+      if (refImageControls) refImageControls.style.display = 'none';
+      if (refImageScaleRow) refImageScaleRow.style.display = 'none';
+      if (refImagePositionRow) refImagePositionRow.style.display = 'none';
+      if (refImageOptionsRow) refImageOptionsRow.style.display = 'none';
+    };
+
+    // Load button triggers file input
+    if (loadRefImageBtn && refImageInput) {
+      loadRefImageBtn.addEventListener('click', () => {
+        refImageInput.click();
+      });
+    }
+
+    // File upload handler
+    if (refImageInput) {
+      refImageInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (file) {
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            const img = new Image();
+            img.onload = () => {
+              this.state.referenceImage.image = img;
+              this.state.referenceImage.originalWidth = img.width;
+              this.state.referenceImage.originalHeight = img.height;
+              this.state.referenceImage.scale = 1;
+              this.state.referenceImage.width = img.width;
+              this.state.referenceImage.height = img.height;
+              // Center the image on canvas
+              this.state.referenceImage.x = -img.width / 2;
+              this.state.referenceImage.y = -img.height / 2;
+              // Update position inputs
+              if (refImageX) refImageX.value = Math.round(this.state.referenceImage.x);
+              if (refImageY) refImageY.value = Math.round(this.state.referenceImage.y);
+              // Show controls
+              showControls();
+              this.render();
+            };
+            img.src = event.target.result;
+          };
+          reader.readAsDataURL(file);
+        }
+      });
+    }
+
+    // Opacity slider
+    if (refImageOpacity) {
+      refImageOpacity.addEventListener('input', (e) => {
+        const opacity = parseInt(e.target.value) / 100;
+        this.state.referenceImage.opacity = opacity;
+        if (refImageOpacityValue) refImageOpacityValue.textContent = e.target.value + '%';
+        this.render();
+      });
+    }
+
+    // Scale slider
+    if (refImageScale) {
+      refImageScale.addEventListener('input', (e) => {
+        const scale = parseInt(e.target.value) / 100;
+        this.state.referenceImage.scale = scale;
+        this.state.referenceImage.width = this.state.referenceImage.originalWidth * scale;
+        this.state.referenceImage.height = this.state.referenceImage.originalHeight * scale;
+        if (refImageScaleValue) refImageScaleValue.textContent = e.target.value + '%';
+        this.render();
+      });
+    }
+
+    // Position X
+    if (refImageX) {
+      refImageX.addEventListener('change', (e) => {
+        this.state.referenceImage.x = parseFloat(e.target.value) || 0;
+        this.render();
+      });
+    }
+
+    // Position Y
+    if (refImageY) {
+      refImageY.addEventListener('change', (e) => {
+        this.state.referenceImage.y = parseFloat(e.target.value) || 0;
+        this.render();
+      });
+    }
+
+    // Lock toggle
+    if (refImageLocked) {
+      refImageLocked.addEventListener('change', (e) => {
+        this.state.referenceImage.locked = e.target.checked;
+      });
+    }
+
+    // Clear button
+    if (clearRefImageBtn) {
+      clearRefImageBtn.addEventListener('click', () => {
+        this.state.referenceImage.image = null;
+        this.state.referenceImage.width = 0;
+        this.state.referenceImage.height = 0;
+        if (refImageInput) refImageInput.value = '';
+        hideControls();
+        this.render();
       });
     }
   }

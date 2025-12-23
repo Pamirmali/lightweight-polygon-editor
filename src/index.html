@@ -275,6 +275,38 @@
           </div>
         </div>
 
+        <!-- Reference Image Panel -->
+        <div class="panel">
+          <h3>Reference Image</h3>
+          <div class="panel-row">
+            <input type="file" id="refImageInput" accept="image/*" style="display: none;" />
+            <button class="btn" id="loadRefImageBtn">Load Image</button>
+            <button class="btn" id="clearRefImageBtn">Clear</button>
+          </div>
+          <div class="panel-row" id="refImageControls" style="display: none;">
+            <label>Opacity:</label>
+            <input type="range" id="refImageOpacity" value="50" min="0" max="100" />
+            <span id="refImageOpacityValue">50%</span>
+          </div>
+          <div class="panel-row" id="refImageScaleRow" style="display: none;">
+            <label>Scale:</label>
+            <input type="range" id="refImageScale" value="100" min="10" max="300" />
+            <span id="refImageScaleValue">100%</span>
+          </div>
+          <div class="panel-row" id="refImagePositionRow" style="display: none;">
+            <label>X:</label>
+            <input type="number" id="refImageX" value="0" step="10" style="width: 60px;" />
+            <label>Y:</label>
+            <input type="number" id="refImageY" value="0" step="10" style="width: 60px;" />
+          </div>
+          <div class="panel-row" id="refImageOptionsRow" style="display: none;">
+            <label>
+              <input type="checkbox" id="refImageLocked" />
+              <span>Lock Position</span>
+            </label>
+          </div>
+        </div>
+
         <!-- Export Panel -->
         <div class="panel">
           <h3>Export</h3>
