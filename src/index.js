@@ -691,7 +691,8 @@ class PolygonEditor {
     const linkBtn = document.getElementById('linkFolderBtn');
     const unlinkBtn = document.getElementById('unlinkFolderBtn');
     const refreshBtn = document.getElementById('refreshFilesBtn');
-    const loadBtn = document.getElementById('loadFromFileBtn');
+    const loadProjectBtn = document.getElementById('loadProjectBtn');
+    const loadIntoFrameBtn = document.getElementById('loadIntoFrameBtn');
     const saveBtn = document.getElementById('saveToFolderBtn');
     const fileNameInput = document.getElementById('saveFileName');
 
@@ -721,14 +722,20 @@ class PolygonEditor {
       });
     }
 
-    if (loadBtn) {
-      loadBtn.addEventListener('click', async () => {
-        if (this.folder.useFallback || !this.folder.isLinked()) {
-          // Use file picker for fallback/unlinked mode
-          const data = await this.folder.loadFileFallback();
-          if (data) {
-            this.loadProjectData(data);
-          }
+    if (loadProjectBtn) {
+      loadProjectBtn.addEventListener('click', async () => {
+        const data = await this.folder.loadFileFallback();
+        if (data) {
+          this.loadProjectData(data);
+        }
+      });
+    }
+
+    if (loadIntoFrameBtn) {
+      loadIntoFrameBtn.addEventListener('click', async () => {
+        const data = await this.folder.loadFileFallback();
+        if (data) {
+          this.loadShapesIntoCurrentFrame(data);
         }
       });
     }
@@ -812,6 +819,83 @@ class PolygonEditor {
     } catch (err) {
       console.error('Error loading project data:', err);
       alert('Failed to load project: ' + err.message);
+    }
+  }
+
+  loadShapesIntoCurrentFrame(data) {
+    // Load shapes from a file into the current frame's active layer
+    try {
+      const currentFrame = this.frames.getCurrentFrame();
+      if (!currentFrame) {
+        alert('No frame available');
+        return;
+      }
+
+      const activeLayer = this.layers.getActiveLayer();
+      if (!activeLayer) {
+        alert('No layer available');
+        return;
+      }
+
+      let shapesToAdd = [];
+
+      // Extract shapes from various data formats
+      if (data.frames && Array.isArray(data.frames) && data.frames.length > 0) {
+        // Animation file - get shapes from first frame's first layer
+        const firstFrame = data.frames[0];
+        if (firstFrame.layers && firstFrame.layers.length > 0) {
+          for (const layer of firstFrame.layers) {
+            if (layer.shapes && Array.isArray(layer.shapes)) {
+              shapesToAdd.push(...layer.shapes);
+            }
+          }
+        }
+      } else if (data.layers && Array.isArray(data.layers)) {
+        // Frame file with layers
+        for (const layer of data.layers) {
+          if (layer.shapes && Array.isArray(layer.shapes)) {
+            shapesToAdd.push(...layer.shapes);
+          }
+        }
+      } else if (data.shapes && Array.isArray(data.shapes)) {
+        // Direct shapes array
+        shapesToAdd = data.shapes;
+      } else if (data.vertices || data.verts) {
+        // Single shape with vertices
+        shapesToAdd = [{
+          id: 'shape_' + Date.now(),
+          type: 'polygon',
+          vertices: data.vertices || data.verts,
+          closed: data.closed !== false,
+          selected: false,
+          fill: data.fill || 'rgba(74, 158, 255, 0.2)',
+          stroke: data.stroke || '#4a9eff'
+        }];
+      }
+
+      if (shapesToAdd.length === 0) {
+        alert('No shapes found in file');
+        return;
+      }
+
+      // Clone shapes with new IDs to avoid conflicts
+      const clonedShapes = shapesToAdd.map(shape => ({
+        ...JSON.parse(JSON.stringify(shape)),
+        id: 'shape_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+        selected: false
+      }));
+
+      // Add shapes to active layer
+      activeLayer.shapes.push(...clonedShapes);
+
+      this.saveHistory();
+      this.layers.updateUI();
+      this.render();
+
+      this.showNotification(`Loaded ${clonedShapes.length} shape(s) into current frame`);
+    } catch (err) {
+      console.error('Error loading shapes into frame:', err);
+      alert('Failed to load shapes: ' + err.message);
     }
   }
 

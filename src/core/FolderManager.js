@@ -51,6 +51,7 @@ export class FolderManager {
     const filesListContainer = document.getElementById('folderFilesList');
     const saveRow = document.getElementById('folderSaveRow');
     const actionsRow = document.getElementById('folderActionsRow');
+    const actionsRow2 = document.getElementById('folderActionsRow2');
     const linkBtn = document.getElementById('linkFolderBtn');
     const unlinkBtn = document.getElementById('unlinkFolderBtn');
 
@@ -61,6 +62,7 @@ export class FolderManager {
     if (filesListContainer) filesListContainer.style.display = 'none';
     if (saveRow) saveRow.style.display = 'flex';
     if (actionsRow) actionsRow.style.display = 'flex';
+    if (actionsRow2) actionsRow2.style.display = 'flex';
     if (linkBtn) linkBtn.style.display = 'none';
     if (unlinkBtn) {
       unlinkBtn.style.display = '';
@@ -254,6 +256,7 @@ export class FolderManager {
     const filesListContainer = document.getElementById('folderFilesList');
     const saveRow = document.getElementById('folderSaveRow');
     const actionsRow = document.getElementById('folderActionsRow');
+    const actionsRow2 = document.getElementById('folderActionsRow2');
     const fileNameInput = document.getElementById('saveFileName');
 
     // Update button text based on browser support
@@ -272,6 +275,7 @@ export class FolderManager {
       if (filesListContainer) filesListContainer.style.display = '';
       if (saveRow) saveRow.style.display = 'flex';
       if (actionsRow) actionsRow.style.display = 'flex';
+      if (actionsRow2) actionsRow2.style.display = 'flex';
       if (fileNameInput && this.currentFileName) {
         fileNameInput.value = this.currentFileName;
       }
@@ -293,6 +297,7 @@ export class FolderManager {
       // For Firefox, show save row by default and hide link button
       if (saveRow) saveRow.style.display = this.useFallback ? 'flex' : 'none';
       if (actionsRow) actionsRow.style.display = this.useFallback ? 'flex' : 'none';
+      if (actionsRow2) actionsRow2.style.display = this.useFallback ? 'flex' : 'none';
       if (linkBtn && this.useFallback) linkBtn.style.display = 'none';
     }
   }
