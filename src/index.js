@@ -117,7 +117,13 @@ class PolygonEditor {
 
     // Create initial frame and layer
     this.frames.addFrame();
-    this.layers.addLayer('Layer 1');
+    // Note: addFrame() already creates a frame with Layer 1, no need to add another
+    // Set the active layer to the first layer of the first frame
+    const firstFrame = this.frames.getCurrentFrame();
+    if (firstFrame && firstFrame.layers.length > 0) {
+      this.layers.activeLayerId = firstFrame.layers[0].id;
+      this.layers.updateUI();
+    }
 
     // Initial render
     this.centerView();
