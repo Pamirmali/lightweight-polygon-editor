@@ -465,6 +465,93 @@ html, body {
   cursor: pointer;
 }
 
+/* Folder/Project Panel */
+.folder-status {
+  font-size: 11px;
+  color: var(--fg-muted);
+  padding: 4px 0;
+  word-break: break-all;
+}
+
+.folder-status.linked {
+  color: var(--success);
+}
+
+.folder-files-list {
+  margin-top: 8px;
+}
+
+.folder-files-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  color: var(--fg-muted);
+  margin-bottom: 4px;
+}
+
+.btn-small {
+  background: transparent;
+  border: none;
+  color: var(--fg-muted);
+  cursor: pointer;
+  padding: 2px 4px;
+  font-size: 12px;
+}
+
+.btn-small:hover {
+  color: var(--fg);
+}
+
+.files-list {
+  max-height: 150px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+}
+
+.file-item {
+  display: flex;
+  align-items: center;
+  padding: 6px 8px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  gap: 8px;
+}
+
+.file-item:last-child {
+  border-bottom: none;
+}
+
+.file-item:hover {
+  background: var(--bg-light);
+}
+
+.file-item.active {
+  background: var(--accent-dim);
+}
+
+.file-item .file-icon {
+  font-size: 14px;
+}
+
+.file-item .file-name {
+  flex: 1;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-item .file-type {
+  font-size: 10px;
+  color: var(--fg-muted);
+  background: var(--bg-panel);
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+
 /* Export */
 .copy-row {
   display: flex;

@@ -9,6 +9,7 @@ import { ShapeFactory } from './core/ShapeFactory.js';
 import { InputHandler } from './core/InputHandler.js';
 import { ToolManager } from './core/ToolManager.js';
 import { ExportManager } from './core/ExportManager.js';
+import { FolderManager } from './core/FolderManager.js';
 
 class PolygonEditor {
   constructor() {
@@ -95,6 +96,7 @@ class PolygonEditor {
     this.input = new InputHandler(this);
     this.tools = new ToolManager(this);
     this.exporter = new ExportManager(this);
+    this.folder = new FolderManager(this);
 
     // Initialize input
     this.input.init(this.canvas);
@@ -553,6 +555,9 @@ class PolygonEditor {
 
     // Reference Image controls
     this.setupReferenceImagePanel();
+
+    // Folder/Project controls
+    this.setupFolderPanel();
   }
 
   setupReferenceImagePanel() {
@@ -680,6 +685,140 @@ class PolygonEditor {
         this.render();
       });
     }
+  }
+
+  setupFolderPanel() {
+    const linkBtn = document.getElementById('linkFolderBtn');
+    const unlinkBtn = document.getElementById('unlinkFolderBtn');
+    const refreshBtn = document.getElementById('refreshFilesBtn');
+    const loadBtn = document.getElementById('loadFromFileBtn');
+    const saveBtn = document.getElementById('saveToFolderBtn');
+    const fileNameInput = document.getElementById('saveFileName');
+
+    if (linkBtn) {
+      linkBtn.addEventListener('click', async () => {
+        if (this.folder.useFallback) {
+          // In fallback mode, "Link Folder" becomes "Load File"
+          const data = await this.folder.loadFileFallback();
+          if (data) {
+            this.loadProjectData(data);
+          }
+        } else {
+          await this.folder.linkFolder();
+        }
+      });
+    }
+
+    if (unlinkBtn) {
+      unlinkBtn.addEventListener('click', () => {
+        this.folder.unlinkFolder();
+      });
+    }
+
+    if (refreshBtn) {
+      refreshBtn.addEventListener('click', async () => {
+        await this.folder.refreshFiles();
+      });
+    }
+
+    if (loadBtn) {
+      loadBtn.addEventListener('click', async () => {
+        if (this.folder.useFallback || !this.folder.isLinked()) {
+          // Use file picker for fallback/unlinked mode
+          const data = await this.folder.loadFileFallback();
+          if (data) {
+            this.loadProjectData(data);
+          }
+        }
+      });
+    }
+
+    if (saveBtn) {
+      saveBtn.addEventListener('click', async () => {
+        const fileName = fileNameInput?.value?.trim() || 'project';
+        const data = this.folder.getProjectData();
+        const success = await this.folder.saveFile(fileName, data);
+        if (success) {
+          this.showNotification('Project saved!');
+        }
+      });
+    }
+
+    // Initialize folder UI state
+    this.folder.updateUI();
+  }
+
+  loadProjectData(data) {
+    // Load project data from file
+    try {
+      if (data.canvasWidth) this.canvasWidth = data.canvasWidth;
+      if (data.canvasHeight) this.canvasHeight = data.canvasHeight;
+      if (data.fps) this.state.fps = data.fps;
+
+      if (data.frames && Array.isArray(data.frames)) {
+        // Load animation with multiple frames
+        this.frames.frames = data.frames.map(frame => ({
+          id: frame.id || this.frames.generateId(),
+          layers: frame.layers.map(layer => ({
+            id: layer.id || 'layer_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+            name: layer.name || 'Layer 1',
+            visible: layer.visible !== false,
+            locked: layer.locked || false,
+            shapes: layer.shapes || []
+          }))
+        }));
+        this.frames.currentFrameIndex = data.currentFrameIndex || 0;
+      } else if (data.layers && Array.isArray(data.layers)) {
+        // Load single frame with layers
+        this.frames.frames = [{
+          id: this.frames.generateId(),
+          layers: data.layers.map(layer => ({
+            id: layer.id || 'layer_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+            name: layer.name || 'Layer 1',
+            visible: layer.visible !== false,
+            locked: layer.locked || false,
+            shapes: layer.shapes || []
+          }))
+        }];
+        this.frames.currentFrameIndex = 0;
+      } else if (data.shapes && Array.isArray(data.shapes)) {
+        // Load just shapes into a single layer
+        this.frames.frames = [{
+          id: this.frames.generateId(),
+          layers: [{
+            id: 'layer_' + Date.now(),
+            name: 'Layer 1',
+            visible: true,
+            locked: false,
+            shapes: data.shapes
+          }]
+        }];
+        this.frames.currentFrameIndex = 0;
+      }
+
+      // Reset active layer to first layer of current frame
+      const currentFrame = this.frames.getCurrentFrame();
+      if (currentFrame && currentFrame.layers.length > 0) {
+        this.layers.activeLayerId = currentFrame.layers[0].id;
+      }
+
+      // Update UI
+      this.frames.updateUI();
+      this.layers.updateUI();
+      this.saveHistory();
+      this.render();
+
+      this.showNotification('Project loaded!');
+    } catch (err) {
+      console.error('Error loading project data:', err);
+      alert('Failed to load project: ' + err.message);
+    }
+  }
+
+  showNotification(message) {
+    // Simple notification - could be enhanced with a toast UI
+    console.log(message);
+    // For now, we'll just log it. Could add a toast notification later.
   }
 
   setTool(toolName) {

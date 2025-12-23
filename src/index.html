@@ -307,6 +307,31 @@
           </div>
         </div>
 
+        <!-- Project Folder Panel -->
+        <div class="panel">
+          <h3>Project</h3>
+          <div class="panel-row">
+            <button class="btn" id="linkFolderBtn">📁 Link Folder</button>
+            <button class="btn" id="unlinkFolderBtn" style="display: none;">Unlink</button>
+          </div>
+          <div id="folderStatus" class="folder-status">No folder linked</div>
+          <div id="folderFilesList" class="folder-files-list" style="display: none;">
+            <div class="folder-files-header">
+              <span>Files</span>
+              <button class="btn-small" id="refreshFilesBtn" title="Refresh">🔄</button>
+            </div>
+            <div id="filesList" class="files-list"></div>
+          </div>
+          <div class="panel-row" id="folderSaveRow" style="display: none;">
+            <input type="text" id="saveFileName" placeholder="filename" style="flex: 1;" />
+            <span>.json</span>
+          </div>
+          <div class="panel-row" id="folderActionsRow" style="display: none;">
+            <button class="btn" id="loadFromFileBtn">� Load</button>
+            <button class="btn" id="saveToFolderBtn">💾 Save</button>
+          </div>
+        </div>
+
         <!-- Export Panel -->
         <div class="panel">
           <h3>Export</h3>
