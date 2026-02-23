@@ -6,9 +6,20 @@ export class FrameManager {
     this.currentFrameIndex = 0;
   }
 
-  createEmptyFrame() {
+  createEmptyFrame(time = null) {
+    // Auto-assign time: place 1 second after the last keyframe, or at 0
+    if (time === null) {
+      if (this.frames.length > 0) {
+        const lastTime = Math.max(...this.frames.map(f => f.time || 0));
+        time = lastTime + 1.0;
+      } else {
+        time = 0;
+      }
+    }
     return {
       id: this.generateId(),
+      time: time,
+      easing: 'easeInOutQuad',
       layers: [{
         id: 'layer_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
         name: 'Layer 1',
@@ -34,15 +45,19 @@ export class FrameManager {
     return null;
   }
 
-  addFrame() {
-    const frame = this.createEmptyFrame();
+  addFrame(time = null) {
+    const frame = this.createEmptyFrame(time);
     this.frames.push(frame);
-    this.currentFrameIndex = this.frames.length - 1;
+    // Sort by time to maintain order
+    this.sortByTime();
+    this.currentFrameIndex = this.frames.indexOf(frame);
     
     if (this.app.layers) {
       this.app.layers.activeLayerId = frame.layers[0].id;
     }
     
+    // Update timeline duration if needed
+    this.updateTimelineDuration();
     this.updateUI();
     this.app.render();
     return frame;
@@ -52,8 +67,12 @@ export class FrameManager {
     if (this.frames.length === 0) return this.addFrame();
 
     const currentFrame = this.getCurrentFrame();
+    // Place duplicate 0.5s after current keyframe
+    const newTime = (currentFrame.time || 0) + 0.5;
     const newFrame = {
       id: this.generateId(),
+      time: newTime,
+      easing: currentFrame.easing || 'easeInOutQuad',
       layers: currentFrame.layers.map(layer => ({
         id: 'layer_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
         name: layer.name,
@@ -63,10 +82,12 @@ export class FrameManager {
       }))
     };
 
-    this.frames.splice(this.currentFrameIndex + 1, 0, newFrame);
-    this.currentFrameIndex++;
+    this.frames.push(newFrame);
+    this.sortByTime();
+    this.currentFrameIndex = this.frames.indexOf(newFrame);
     this.app.layers.activeLayerId = newFrame.layers[0].id;
     
+    this.updateTimelineDuration();
     this.updateUI();
     this.app.render();
     return newFrame;
@@ -85,6 +106,7 @@ export class FrameManager {
       this.app.layers.activeLayerId = frame.layers[0]?.id;
     }
     
+    this.updateTimelineDuration();
     this.updateUI();
     this.app.render();
   }
@@ -94,6 +116,12 @@ export class FrameManager {
     
     this.currentFrameIndex = index;
     const frame = this.getCurrentFrame();
+    
+    // Sync playhead to keyframe time
+    if (this.app.state && frame.time != null) {
+      this.app.state.playheadTime = frame.time;
+      this.app.state.interpolatedFrame = null;
+    }
     
     // Keep active layer if it exists in new frame, otherwise use first
     if (this.app.layers) {
@@ -126,27 +154,64 @@ export class FrameManager {
     // Update frame display
     const frameDisplay = document.getElementById('frameDisplay');
     if (frameDisplay) {
-      frameDisplay.textContent = `Frame: ${this.currentFrameIndex + 1} / ${this.frames.length}`;
+      const kf = this.getCurrentFrame();
+      const timeStr = kf ? (kf.time || 0).toFixed(2) + 's' : '';
+      frameDisplay.textContent = `KF: ${this.currentFrameIndex + 1} / ${this.frames.length}  ${timeStr}`;
     }
 
     // Update timeline thumbnails
     const container = document.getElementById('timelineFrames');
-    if (!container) return;
+    if (container) {
+      container.innerHTML = '';
+      this.frames.forEach((frame, index) => {
+        const thumb = document.createElement('div');
+        thumb.className = 'frame-thumb' + (index === this.currentFrameIndex ? ' active' : '');
+        const timeLabel = (frame.time || 0).toFixed(1) + 's';
+        thumb.innerHTML = `<span class="frame-thumb-num">${index + 1}</span><span class="frame-thumb-time">${timeLabel}</span>`;
+        thumb.addEventListener('click', () => this.goToFrame(index));
+        container.appendChild(thumb);
+      });
+    }
     
-    container.innerHTML = '';
+    // Refresh the visual timeline canvas
+    if (this.app.timelineUI) {
+      this.app.timelineUI.selectedKeyframe = this.currentFrameIndex;
+      this.app.timelineUI.render();
+    }
 
-    this.frames.forEach((frame, index) => {
-      const thumb = document.createElement('div');
-      thumb.className = 'frame-thumb' + (index === this.currentFrameIndex ? ' active' : '');
-      thumb.textContent = index + 1;
-      thumb.addEventListener('click', () => this.goToFrame(index));
-      container.appendChild(thumb);
-    });
-    
     // Update layers UI
     if (this.app.layers) {
       this.app.layers.updateUI();
     }
+  }
+
+  // ============= TIMELINE HELPERS =============
+
+  sortByTime() {
+    const currentFrame = this.getCurrentFrame();
+    this.frames.sort((a, b) => (a.time || 0) - (b.time || 0));
+    if (currentFrame) {
+      this.currentFrameIndex = this.frames.indexOf(currentFrame);
+    }
+  }
+
+  updateTimelineDuration() {
+    if (!this.app.state) return;
+    const maxTime = this.frames.reduce((max, f) => Math.max(max, f.time || 0), 0);
+    // Ensure duration is at least 1s beyond the last keyframe
+    this.app.state.timelineDuration = Math.max(maxTime + 1.0, this.app.state.timelineDuration || 5.0);
+  }
+
+  /** Get keyframe time range surrounding a given time */
+  getKeyframeBounds(time) {
+    let prev = null;
+    let next = null;
+    for (let i = 0; i < this.frames.length; i++) {
+      const t = this.frames[i].time || 0;
+      if (t <= time) prev = { index: i, time: t };
+      if (t >= time && next === null) next = { index: i, time: t };
+    }
+    return { prev, next };
   }
 
   // ============= EASING FUNCTIONS =============
