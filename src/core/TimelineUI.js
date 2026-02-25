@@ -348,17 +348,56 @@ export class TimelineUI {
     if (x < -10 || x > this.width + 10) return;
 
     // Playhead line
+    ctx.strokeStyle = '#ff6b6b';
+    ctx.lineWidth = this.playheadWidth;
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, h);
+    ctx.stroke();
+
+    // Playhead handle (triangle at top)
+    ctx.fillStyle = '#ff6b6b';
+    ctx.beginPath();
+    ctx.moveTo(x - 6, 0);
+    ctx.lineTo(x + 6, 0);
+    ctx.lineTo(x, 8);
+    ctx.closePath();
+    ctx.fill();
+
+    // Time label near playhead
+    ctx.fillStyle = '#ff6b6b';
+    ctx.font = 'bold 10px -apple-system, BlinkMacSystemFont, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    const label = time.toFixed(2) + 's';
+    ctx.fillText(label, x, h - 2);
+  }
+
+  // ====== Interaction ======
+
+  getMousePos(e) {
+    const rect = this.canvas.getBoundingClientRect();
+    return {
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top
+    };
+  }
 
   hitTestKeyframe(mx, my) {
     const keyframes = this.frames.frames;
     const trackY = this.rulerHeight;
     const trackH = this.height - this.rulerHeight;
     const centerY = trackY + trackH / 2;
-    for (let i = 0; i < keyframes.length; i++) {
-      const x = this.timeToX(keyframes[i].time || 0);
+    const hitRadius = this.keyframeSize + 4;
+
+    for (let i = keyframes.length - 1; i >= 0; i--) {
+      const kf = keyframes[i];
+      const x = this.timeToX(kf.time || 0);
       const dx = mx - x;
       const dy = my - centerY;
-      if (Math.abs(dx) + Math.abs(dy) < this.keyframeSize + 4) return i;
+      if (Math.abs(dx) < hitRadius && Math.abs(dy) < hitRadius) {
+        return i;
+      }
     }
     return -1;
   }
@@ -368,33 +407,427 @@ export class TimelineUI {
     return Math.abs(mx - x) < 8;
   }
 
-  getEasingShortName(easing) {
-    const names = {
-      'linear': 'Lin',
-      'easeInQuad': 'In',
-      'easeOutQuad': 'Out',
-      'easeInOutQuad': 'InOut',
-      'easeInCubic': 'CubIn',
-      'easeOutCubic': 'CubOut',
-      'easeInOutCubic': 'CubIO',
-      'easeInQuart': 'QIn',
-      'easeOutQuart': 'QOut',
-      'easeInOutQuart': 'QIO',
-      'easeInElastic': 'ElIn',
-      'easeOutElastic': 'ElOut',
-      'easeOutBounce': 'Bnc'
-    };
-    return names[easing] || easing;
+  hitTestTransition(mx, my) {
+    const keyframes = this.frames.frames;
+    const trackY = this.rulerHeight;
+    const trackH = this.height - this.rulerHeight;
+    if (my < trackY || my > trackY + trackH) return -1;
+
+    for (let i = 0; i < keyframes.length - 1; i++) {
+      const x1 = this.timeToX(keyframes[i].time || 0);
+      const x2 = this.timeToX(keyframes[i + 1].time || 0);
+      // Must be between the two keyframes (with a small margin past the diamond)
+      const margin = this.keyframeSize + 4;
+      if (mx > x1 + margin && mx < x2 - margin) {
+        return i;
+      }
+    }
+    return -1;
   }
 
-  destroy() {
-    if (this.canvas) {
-      this.canvas.removeEventListener('mousedown', this._onMouseDown);
-      this.canvas.removeEventListener('mousemove', this._onMouseMove);
-      this.canvas.removeEventListener('mouseup', this._onMouseUp);
-      this.canvas.removeEventListener('dblclick', this._onDoubleClick);
-      this.canvas.removeEventListener('wheel', this._onWheel);
-      this.canvas.removeEventListener('contextmenu', this._onContextMenu);
+  onMouseDown(e) {
+    e.preventDefault();
+    const { x, y } = this.getMousePos(e);
+    this.isMouseDown = true;
+
+    // Check if clicking on playhead
+    if (this.hitTestPlayhead(x) && y < this.rulerHeight + 10) {
+      this.dragging = { type: 'playhead', startX: x, startTime: this.state.playheadTime };
+      return;
     }
+
+    // Check if clicking on a keyframe
+    const kfIndex = this.hitTestKeyframe(x, y);
+    if (kfIndex >= 0) {
+      this.selectedKeyframe = kfIndex;
+      this.selectedTransition = -1;
+      this.frames.goToFrame(kfIndex);
+      this.dragging = {
+        type: 'keyframe',
+        index: kfIndex,
+        startX: x,
+        startTime: this.frames.frames[kfIndex].time || 0
+      };
+      this.render();
+      return;
+    }
+
+    // Check if clicking on a transition segment
+    const trIndex = this.hitTestTransition(x, y);
+    if (trIndex >= 0) {
+      this.selectedTransition = trIndex;
+      this.selectedKeyframe = -1;
+      this.render();
+      return;
+    }
+
+    // Clicking on ruler or empty area -> move playhead
+    if (y <= this.rulerHeight + 5) {
+      const time = Math.max(0, Math.min(this.xToTime(x), this.state.timelineDuration));
+      this.state.playheadTime = time;
+      this.dragging = { type: 'playhead', startX: x, startTime: time };
+      this.updatePlayheadFrame();
+      this.render();
+      return;
+    }
+
+    // Clicked empty track area -> deselect
+    this.selectedKeyframe = -1;
+    this.selectedTransition = -1;
+    this.render();
+  }
+
+  onMouseMove(e) {
+    const { x, y } = this.getMousePos(e);
+
+    if (this.dragging) {
+      if (this.dragging.type === 'playhead') {
+        const time = Math.max(0, Math.min(this.xToTime(x), this.state.timelineDuration));
+        this.state.playheadTime = time;
+        this.updatePlayheadFrame();
+        this.render();
+      } else if (this.dragging.type === 'keyframe') {
+        const dx = x - this.dragging.startX;
+        let newTime = this.dragging.startTime + dx / this.state.timelineZoom;
+        newTime = Math.max(0, Math.min(this.snapTime(newTime), this.state.timelineDuration));
+
+        const kf = this.frames.frames[this.dragging.index];
+        kf.time = newTime;
+        this.sortKeyframes();
+        // Update dragging index after sort
+        this.dragging.index = this.frames.frames.indexOf(kf);
+        this.selectedKeyframe = this.dragging.index;
+        this.frames.currentFrameIndex = this.dragging.index;
+        this.render();
+      }
+      return;
+    }
+
+    // Hover detection for keyframes
+    const prevHoverKf = this.hoveredKeyframe;
+    this.hoveredKeyframe = this.hitTestKeyframe(x, y);
+
+    // Hover detection for transitions
+    const prevHoverTr = this.hoveredTransition;
+    this.hoveredTransition = this.hoveredKeyframe < 0 ? this.hitTestTransition(x, y) : -1;
+
+    if (this.hoveredKeyframe !== prevHoverKf || this.hoveredTransition !== prevHoverTr) {
+      this.canvas.style.cursor = (this.hoveredKeyframe >= 0 || this.hoveredTransition >= 0) ? 'pointer' : 'default';
+      this.render();
+    }
+
+    // Change cursor for playhead area
+    if (this.hitTestPlayhead(x) && y < this.rulerHeight + 10) {
+      this.canvas.style.cursor = 'col-resize';
+    } else if (y <= this.rulerHeight) {
+      this.canvas.style.cursor = 'pointer';
+    }
+  }
+
+  onMouseUp(e) {
+    if (this.dragging && this.dragging.type === 'keyframe') {
+      this.sortKeyframes();
+      this.frames.updateUI();
+      this.app.saveHistory();
+    }
+    this.dragging = null;
+    this.isMouseDown = false;
+  }
+
+  onDoubleClick(e) {
+    const { x, y } = this.getMousePos(e);
+
+    // Double-click on track to add keyframe at that time
+    if (y > this.rulerHeight) {
+      const kfIndex = this.hitTestKeyframe(x, y);
+      if (kfIndex >= 0) {
+        // Double-click on keyframe -> open easing picker for its outgoing transition
+        if (kfIndex < this.frames.frames.length - 1) {
+          this.showTransitionEasingPicker(kfIndex, e.clientX, e.clientY);
+        }
+        return;
+      }
+
+      // Double-click on a transition -> open easing picker
+      const trIndex = this.hitTestTransition(x, y);
+      if (trIndex >= 0) {
+        this.showTransitionEasingPicker(trIndex, e.clientX, e.clientY);
+        return;
+      }
+
+      const time = Math.max(0, Math.min(this.snapTime(this.xToTime(x)), this.state.timelineDuration));
+      this.addKeyframeAtTime(time);
+    }
+  }
+
+  onWheel(e) {
+    e.preventDefault();
+    const { x } = this.getMousePos(e);
+
+    if (e.ctrlKey || e.metaKey) {
+      // Zoom timeline
+      const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+      const timeAtMouse = this.xToTime(x);
+
+      this.state.timelineZoom = Math.max(20, Math.min(2000, this.state.timelineZoom * zoomFactor));
+
+      // Keep the time at mouse position stable
+      this.state.timelineScrollX = timeAtMouse * this.state.timelineZoom - x;
+      this.state.timelineScrollX = Math.max(0, this.state.timelineScrollX);
+    } else {
+      // Scroll timeline
+      this.state.timelineScrollX = Math.max(0, this.state.timelineScrollX + e.deltaY);
+    }
+
+    this.render();
+  }
+
+  onContextMenu(e) {
+    e.preventDefault();
+    const { x, y } = this.getMousePos(e);
+
+    // Right-click on a transition -> easing picker
+    const trIndex = this.hitTestTransition(x, y);
+    if (trIndex >= 0) {
+      this.selectedTransition = trIndex;
+      this.selectedKeyframe = -1;
+      this.showTransitionEasingPicker(trIndex, e.clientX, e.clientY);
+      return;
+    }
+
+    // Right-click on a keyframe -> easing picker for its outgoing transition
+    const kfIndex = this.hitTestKeyframe(x, y);
+    if (kfIndex >= 0 && kfIndex < this.frames.frames.length - 1) {
+      this.selectedTransition = kfIndex;
+      this.selectedKeyframe = -1;
+      this.showTransitionEasingPicker(kfIndex, e.clientX, e.clientY);
+    }
+  }
+
+  // ====== Keyframe operations ======
+
+  addKeyframeAtTime(time) {
+    // Check if there's already a keyframe very close
+    const existing = this.frames.frames.find(kf => Math.abs((kf.time || 0) - time) < 0.02);
+    if (existing) return;
+
+    // Create a new frame at this time (duplicate from nearest keyframe or create empty)
+    const nearestIndex = this.findNearestKeyframeIndex(time);
+    let newFrame;
+    if (nearestIndex >= 0) {
+      const src = this.frames.frames[nearestIndex];
+      newFrame = {
+        id: this.frames.generateId(),
+        time: time,
+        easing: 'easeInOutQuad',
+        layers: JSON.parse(JSON.stringify(src.layers)).map(layer => ({
+          ...layer,
+          id: 'layer_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
+        }))
+      };
+    } else {
+      newFrame = this.frames.createEmptyFrame();
+      newFrame.time = time;
+      newFrame.easing = 'easeInOutQuad';
+    }
+
+    this.frames.frames.push(newFrame);
+    this.sortKeyframes();
+
+    const newIndex = this.frames.frames.indexOf(newFrame);
+    this.frames.currentFrameIndex = newIndex;
+    this.selectedKeyframe = newIndex;
+    this.app.layers.activeLayerId = newFrame.layers[0]?.id;
+
+    this.frames.updateUI();
+    this.app.saveHistory();
+    this.app.render();
+    this.render();
+  }
+
+  findNearestKeyframeIndex(time) {
+    let best = -1;
+    let bestDist = Infinity;
+    for (let i = 0; i < this.frames.frames.length; i++) {
+      const dist = Math.abs((this.frames.frames[i].time || 0) - time);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = i;
+      }
+    }
+    return best;
+  }
+
+  sortKeyframes() {
+    const currentFrame = this.frames.getCurrentFrame();
+    this.frames.frames.sort((a, b) => (a.time || 0) - (b.time || 0));
+    if (currentFrame) {
+      this.frames.currentFrameIndex = this.frames.frames.indexOf(currentFrame);
+    }
+  }
+
+  updatePlayheadFrame() {
+    // During scrubbing, show the interpolated frame at playhead position
+    const time = this.state.playheadTime;
+    const keyframes = this.frames.frames;
+    if (keyframes.length === 0) return;
+
+    // Find surrounding keyframes
+    let prevIndex = -1;
+    let nextIndex = -1;
+
+    for (let i = 0; i < keyframes.length; i++) {
+      const kfTime = keyframes[i].time || 0;
+      if (kfTime <= time) prevIndex = i;
+      if (kfTime >= time && nextIndex < 0) nextIndex = i;
+    }
+
+    if (prevIndex < 0) prevIndex = 0;
+    if (nextIndex < 0) nextIndex = keyframes.length - 1;
+
+    if (prevIndex === nextIndex) {
+      // Exactly at a keyframe
+      this.frames.currentFrameIndex = prevIndex;
+      this.state.interpolatedFrame = null;
+    } else {
+      // Between keyframes - interpolate
+      const prevKf = keyframes[prevIndex];
+      const nextKf = keyframes[nextIndex];
+      const prevTime = prevKf.time || 0;
+      const nextTime = nextKf.time || 0;
+      const t = (time - prevTime) / (nextTime - prevTime);
+
+      const easingName = prevKf.easing || 'linear';
+      const easingFn = this.frames.constructor.easing[easingName] || this.frames.constructor.easing.linear;
+      const easedT = easingFn(t);
+
+      this.state.interpolatedFrame = this.frames.createInterpolatedFrame(prevKf, nextKf, easedT);
+      this.frames.currentFrameIndex = prevIndex;
+    }
+
+    this.app.render();
+    this.frames.updateUI();
+  }
+
+  // ====== Easing Picker ======
+
+  showTransitionEasingPicker(transitionIndex, clientX, clientY) {
+    // Remove existing picker
+    this.hideEasingPicker();
+
+    const kf = this.frames.frames[transitionIndex];
+    if (!kf) return;
+    const nextKf = this.frames.frames[transitionIndex + 1];
+    const currentEasing = kf.easing || 'linear';
+    const fromLabel = `KF ${transitionIndex + 1}`;
+    const toLabel = nextKf ? `KF ${transitionIndex + 2}` : '';
+
+    const picker = document.createElement('div');
+    picker.className = 'easing-picker';
+    picker.id = 'easingPicker';
+    picker.style.left = clientX + 'px';
+    picker.style.top = clientY + 'px';
+
+    // Header showing which transition
+    const header = document.createElement('div');
+    header.className = 'easing-picker-header';
+    header.textContent = toLabel ? `${fromLabel} → ${toLabel}` : fromLabel;
+    picker.appendChild(header);
+
+    const easings = [
+      { value: 'linear', label: 'Linear' },
+      { value: 'easeInQuad', label: 'Ease In' },
+      { value: 'easeOutQuad', label: 'Ease Out' },
+      { value: 'easeInOutQuad', label: 'Ease In-Out' },
+      { value: 'easeInCubic', label: 'Cubic In' },
+      { value: 'easeOutCubic', label: 'Cubic Out' },
+      { value: 'easeInOutCubic', label: 'Cubic In-Out' },
+      { value: 'easeInQuart', label: 'Quart In' },
+      { value: 'easeOutQuart', label: 'Quart Out' },
+      { value: 'easeInOutQuart', label: 'Quart In-Out' },
+      { value: 'easeInElastic', label: 'Elastic In' },
+      { value: 'easeOutElastic', label: 'Elastic Out' },
+      { value: 'easeOutBounce', label: 'Bounce' }
+    ];
+
+    for (const easing of easings) {
+      const item = document.createElement('div');
+      item.className = 'easing-picker-item' + (easing.value === currentEasing ? ' active' : '');
+      item.textContent = easing.label;
+
+      // Mini easing preview canvas
+      const miniCanvas = document.createElement('canvas');
+      miniCanvas.width = 30;
+      miniCanvas.height = 20;
+      miniCanvas.className = 'easing-mini-preview';
+      this.drawMiniEasing(miniCanvas, easing.value);
+      item.prepend(miniCanvas);
+
+      item.addEventListener('click', () => {
+        kf.easing = easing.value;
+        this.selectedTransition = transitionIndex;
+        this.hideEasingPicker();
+        this.app.saveHistory();
+        this.render();
+      });
+      picker.appendChild(item);
+    }
+
+    document.body.appendChild(picker);
+
+    // Reposition to keep within viewport
+    requestAnimationFrame(() => {
+      const rect = picker.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      if (rect.right > vw) {
+        picker.style.left = Math.max(4, vw - rect.width - 8) + 'px';
+      }
+      if (rect.bottom > vh) {
+        picker.style.top = Math.max(4, vh - rect.height - 8) + 'px';
+      }
+      if (rect.left < 0) {
+        picker.style.left = '4px';
+      }
+      if (rect.top < 0) {
+        picker.style.top = '4px';
+      }
+    });
+
+    // Close on outside click
+    const closeHandler = (e) => {
+      if (!picker.contains(e.target)) {
+        this.hideEasingPicker();
+        document.removeEventListener('mousedown', closeHandler);
+      }
+    };
+    setTimeout(() => document.addEventListener('mousedown', closeHandler), 10);
+  }
+
+  hideEasingPicker() {
+    const existing = document.getElementById('easingPicker');
+    if (existing) existing.remove();
+  }
+
+  drawMiniEasing(canvas, easingName) {
+    const ctx = canvas.getContext('2d');
+    const fn = this.frames.constructor.easing[easingName] || this.frames.constructor.easing.linear;
+    const w = canvas.width;
+    const h = canvas.height;
+    const padding = 2;
+
+    ctx.strokeStyle = '#4a9eff';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+
+    for (let i = 0; i <= w - padding * 2; i++) {
+      const t = i / (w - padding * 2);
+      const y = fn(t);
+      const px = padding + i;
+      const py = h - padding - y * (h - padding * 2);
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.stroke();
   }
 }
