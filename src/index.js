@@ -10,6 +10,7 @@ import { InputHandler } from './core/InputHandler.js';
 import { ToolManager } from './core/ToolManager.js';
 import { ExportManager } from './core/ExportManager.js';
 import { FolderManager } from './core/FolderManager.js';
+import { TimelineUI } from './core/TimelineUI.js';
 
 class PolygonEditor {
   constructor() {
@@ -46,10 +47,13 @@ class PolygonEditor {
       brushFalloff: 'smooth',  // 'smooth', 'linear', 'sharp', 'constant'
       softSelectEnabled: false,
       brushPosition: null,  // Current brush position for visualization
-      // Tweening settings
-      tweenEnabled: true,
-      tweenSteps: 10,  // Number of interpolation steps between keyframes
-      tweenEasing: 'easeInOutQuad',
+      // Timeline settings
+      timelineDuration: 5.0,      // Total timeline duration in seconds
+      timelineZoom: 100,          // Pixels per second in timeline
+      timelineScrollX: 0,         // Scroll offset in timeline
+      playheadTime: 0,            // Current playhead position in seconds
+      loopMode: 'loop',           // 'loop', 'pingpong', 'once'
+      playbackSpeed: 1.0,         // Playback speed multiplier
       // Playback state
       isPlaying: false,
       playbackPosition: 0,  // Float: frame index + sub-frame progress (e.g., 0.5 = halfway between frame 0 and 1)
@@ -97,6 +101,7 @@ class PolygonEditor {
     this.tools = new ToolManager(this);
     this.exporter = new ExportManager(this);
     this.folder = new FolderManager(this);
+    this.timelineUI = new TimelineUI(this);
 
     // Initialize input
     this.input.init(this.canvas);
@@ -118,7 +123,7 @@ class PolygonEditor {
     });
 
     // Create initial frame and layer
-    this.frames.addFrame();
+    this.frames.addFrame(0);  // First keyframe at time 0
     // Note: addFrame() already creates a frame with Layer 1, no need to add another
     // Set the active layer to the first layer of the first frame
     const firstFrame = this.frames.getCurrentFrame();
@@ -130,6 +135,9 @@ class PolygonEditor {
     // Initial render
     this.centerView();
     this.saveHistory();
+
+    // Initialize visual timeline
+    this.timelineUI.init('timelineCanvasContainer');
 
     console.log('Polygon Editor initialized');
   }
@@ -492,8 +500,9 @@ class PolygonEditor {
     if (stopBtn) {
       stopBtn.addEventListener('click', () => {
         this.stopPlayback();
-        this.state.playbackPosition = 0;
+        this.state.playheadTime = 0;
         this.frames.goToFrame(0);
+        if (this.timelineUI) this.timelineUI.render();
       });
     }
     
@@ -528,28 +537,26 @@ class PolygonEditor {
       });
     }
 
-    // Tweening controls
-    const tweenToggle = document.getElementById('tweenToggle');
-    if (tweenToggle) {
-      tweenToggle.addEventListener('change', (e) => {
-        this.state.tweenEnabled = e.target.checked;
+
+
+
+
+    // Loop Mode
+    const loopModeSelect = document.getElementById('loopMode');
+    if (loopModeSelect) {
+      loopModeSelect.addEventListener('change', (e) => {
+        this.state.loopMode = e.target.value;
       });
     }
 
-    const tweenStepsInput = document.getElementById('tweenSteps');
-    if (tweenStepsInput) {
-      tweenStepsInput.addEventListener('change', (e) => {
-        this.state.tweenSteps = parseInt(e.target.value) || 10;
+    // Playback Speed
+    const speedInput = document.getElementById('playbackSpeed');
+    if (speedInput) {
+      speedInput.addEventListener('change', (e) => {
+        this.state.playbackSpeed = parseFloat(e.target.value) || 1.0;
       });
-      tweenStepsInput.addEventListener('input', (e) => {
-        this.state.tweenSteps = parseInt(e.target.value) || 10;
-      });
-    }
-
-    const tweenEasingSelect = document.getElementById('tweenEasing');
-    if (tweenEasingSelect) {
-      tweenEasingSelect.addEventListener('change', (e) => {
-        this.state.tweenEasing = e.target.value;
+      speedInput.addEventListener('input', (e) => {
+        this.state.playbackSpeed = parseFloat(e.target.value) || 1.0;
       });
     }
 
@@ -761,11 +768,16 @@ class PolygonEditor {
       if (data.canvasWidth) this.canvasWidth = data.canvasWidth;
       if (data.canvasHeight) this.canvasHeight = data.canvasHeight;
       if (data.fps) this.state.fps = data.fps;
+      if (data.timelineDuration) this.state.timelineDuration = data.timelineDuration;
+      if (data.loopMode) this.state.loopMode = data.loopMode;
+      if (data.playbackSpeed) this.state.playbackSpeed = data.playbackSpeed;
 
       if (data.frames && Array.isArray(data.frames)) {
         // Load animation with multiple frames
-        this.frames.frames = data.frames.map(frame => ({
+        this.frames.frames = data.frames.map((frame, index) => ({
           id: frame.id || this.frames.generateId(),
+          time: frame.time != null ? frame.time : index * 1.0,
+          easing: frame.easing || 'easeInOutQuad',
           layers: frame.layers.map(layer => ({
             id: layer.id || 'layer_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
             name: layer.name || 'Layer 1',
@@ -779,6 +791,8 @@ class PolygonEditor {
         // Load single frame with layers
         this.frames.frames = [{
           id: this.frames.generateId(),
+          time: 0,
+          easing: 'easeInOutQuad',
           layers: data.layers.map(layer => ({
             id: layer.id || 'layer_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
             name: layer.name || 'Layer 1',
@@ -792,6 +806,8 @@ class PolygonEditor {
         // Load just shapes into a single layer
         this.frames.frames = [{
           id: this.frames.generateId(),
+          time: 0,
+          easing: 'easeInOutQuad',
           layers: [{
             id: 'layer_' + Date.now(),
             name: 'Layer 1',
@@ -810,8 +826,10 @@ class PolygonEditor {
       }
 
       // Update UI
+      this.frames.updateTimelineDuration();
       this.frames.updateUI();
       this.layers.updateUI();
+      if (this.timelineUI) this.timelineUI.render();
       this.saveHistory();
       this.render();
 
@@ -1014,7 +1032,9 @@ class PolygonEditor {
       currentFrameIndex: this.frames.currentFrameIndex,
       activeLayerId: this.layers.activeLayerId,
       selectedShapes: [...this.state.selectedShapes],
-      selectedVertices: [...this.state.selectedVertices]
+      selectedVertices: [...this.state.selectedVertices],
+      timelineDuration: this.state.timelineDuration,
+      playheadTime: this.state.playheadTime
     };
   }
 
@@ -1024,9 +1044,12 @@ class PolygonEditor {
     this.layers.activeLayerId = state.activeLayerId;
     this.state.selectedShapes = state.selectedShapes || [];
     this.state.selectedVertices = state.selectedVertices || [];
+    if (state.timelineDuration) this.state.timelineDuration = state.timelineDuration;
+    if (state.playheadTime != null) this.state.playheadTime = state.playheadTime;
     
     this.frames.updateUI();
     this.layers.updateUI();
+    if (this.timelineUI) this.timelineUI.render();
     this.render();
   }
 
@@ -1039,121 +1062,189 @@ class PolygonEditor {
 
   togglePlayback() {
     if (this.state.isPlaying) {
-      // Stop playback
       this.stopPlayback();
     } else {
-      // Start playback
       this.startPlayback();
     }
   }
 
   startPlayback() {
-    if (this.frames.frames.length < 2) {
-      // Need at least 2 frames for animation
-      return;
-    }
+    if (this.frames.frames.length < 2) return;
 
     this.state.isPlaying = true;
-    this.state.playbackPosition = this.frames.currentFrameIndex;
-    
+    this._lastPlaybackTimestamp = null;
+    this._playbackDirection = 1; // 1 = forward, -1 = reverse (for pingpong)
+    this._fpsAccumulator = 0; // Accumulated time for FPS throttling
+
     const playBtn = document.getElementById('playBtn');
     if (playBtn) playBtn.classList.add('playing');
 
-    // Calculate timing
-    // If tweening is enabled, we interpolate between frames
-    // Total steps per keyframe transition = tweenSteps
-    // FPS controls overall speed
-    
-    const updatePlayback = () => {
+    const animate = (timestamp) => {
       if (!this.state.isPlaying) return;
 
-      const totalFrames = this.frames.frames.length;
-      const tweenEnabled = this.state.tweenEnabled;
-      const tweenSteps = this.state.tweenSteps;
-      
-      // Calculate increment per tick
-      // With tweening: move 1/tweenSteps of a frame per tick
-      // Without tweening: move 1 frame per tick
-      const increment = tweenEnabled ? (1 / tweenSteps) : 1;
-      
-      this.state.playbackPosition += increment;
-      
-      // Loop back to start
-      if (this.state.playbackPosition >= totalFrames) {
-        this.state.playbackPosition = 0;
+      if (this._lastPlaybackTimestamp === null) {
+        this._lastPlaybackTimestamp = timestamp;
       }
 
-      // Update the interpolated frame for rendering
-      if (tweenEnabled && totalFrames >= 2) {
-        this.updateInterpolatedFrame();
-      } else {
-        // No tweening - just show the current keyframe
-        this.frames.currentFrameIndex = Math.floor(this.state.playbackPosition);
-        this.state.interpolatedFrame = null;
+      const elapsed = (timestamp - this._lastPlaybackTimestamp) / 1000; // seconds
+      this._lastPlaybackTimestamp = timestamp;
+
+      // Advance playhead time continuously
+      const speed = this.state.playbackSpeed * this._playbackDirection;
+      let newTime = this.state.playheadTime + elapsed * speed;
+      const { minTime, maxTime } = this.getPlayableRange();
+      const duration = maxTime - minTime;
+
+      if (duration < 0.001) {
+        this.stopPlayback();
+        return;
       }
 
-      this.render();
-      
-      // Update frame display
-      const frameDisplay = document.getElementById('frameDisplay');
-      if (frameDisplay) {
-        const currentFrame = Math.floor(this.state.playbackPosition) + 1;
-        const subFrame = this.state.playbackPosition % 1;
-        if (tweenEnabled && subFrame > 0.01) {
-          frameDisplay.textContent = `Frame: ${currentFrame}.${Math.round(subFrame * 10)} / ${totalFrames}`;
-        } else {
-          frameDisplay.textContent = `Frame: ${currentFrame} / ${totalFrames}`;
+      // Handle loop modes
+      if (this.state.loopMode === 'loop') {
+        if (newTime > maxTime) newTime = minTime + ((newTime - minTime) % duration);
+        if (newTime < minTime) newTime = maxTime - ((minTime - newTime) % duration);
+      } else if (this.state.loopMode === 'pingpong') {
+        if (newTime > maxTime) {
+          newTime = maxTime - (newTime - maxTime);
+          this._playbackDirection = -1;
+        } else if (newTime < minTime) {
+          newTime = minTime + (minTime - newTime);
+          this._playbackDirection = 1;
         }
+      } else { // 'once'
+        if (newTime > maxTime) {
+          newTime = maxTime;
+          this.stopPlayback();
+        } else if (newTime < minTime) {
+          newTime = minTime;
+          this.stopPlayback();
+        }
+      }
+
+      this.state.playheadTime = Math.max(minTime, Math.min(newTime, maxTime));
+
+      // FPS throttling: only update visuals at the configured frame rate
+      const fpsInterval = 1.0 / (this.state.fps || 12);
+      this._fpsAccumulator += elapsed;
+      if (this._fpsAccumulator >= fpsInterval) {
+        this._fpsAccumulator -= fpsInterval;
+        // Avoid accumulator drift
+        if (this._fpsAccumulator > fpsInterval) this._fpsAccumulator = 0;
+
+        this.updateInterpolatedFrame();
+        this.render();
+
+        // Update timeline UI
+        if (this.timelineUI) this.timelineUI.render();
+
+        // Update frame display
+        this.updatePlaybackDisplay();
+      }
+
+      if (this.state.isPlaying) {
+        this._animFrameId = requestAnimationFrame(animate);
       }
     };
 
-    // Use requestAnimationFrame for smoother animation, but control speed with fps
-    const delay = 1000 / this.state.fps;
-    this.playbackInterval = setInterval(updatePlayback, delay);
+    this._animFrameId = requestAnimationFrame(animate);
   }
 
   stopPlayback() {
     this.state.isPlaying = false;
     this.state.interpolatedFrame = null;
-    
-    if (this.playbackInterval) {
-      clearInterval(this.playbackInterval);
-      this.playbackInterval = null;
+
+    if (this._animFrameId) {
+      cancelAnimationFrame(this._animFrameId);
+      this._animFrameId = null;
     }
+    this._lastPlaybackTimestamp = null;
 
     const playBtn = document.getElementById('playBtn');
     if (playBtn) playBtn.classList.remove('playing');
 
     // Snap to nearest keyframe
-    this.frames.currentFrameIndex = Math.floor(this.state.playbackPosition);
+    const nearest = this.findNearestKeyframeToTime(this.state.playheadTime);
+    if (nearest >= 0) {
+      this.frames.goToFrame(nearest);
+    }
     this.frames.updateUI();
     this.render();
   }
 
-  updateInterpolatedFrame() {
-    const position = this.state.playbackPosition;
-    const currentIndex = Math.floor(position);
-    const nextIndex = (currentIndex + 1) % this.frames.frames.length;
-    const t = position - currentIndex; // Progress between frames (0 to 1)
+  getPlayableRange() {
+    const times = this.frames.frames.map(f => f.time || 0);
+    if (times.length < 2) return { minTime: 0, maxTime: 1 };
+    return { minTime: Math.min(...times), maxTime: Math.max(...times) };
+  }
 
-    if (t < 0.001) {
-      // At a keyframe, no interpolation needed
+  findNearestKeyframeToTime(time) {
+    let best = 0;
+    let bestDist = Infinity;
+    for (let i = 0; i < this.frames.frames.length; i++) {
+      const dist = Math.abs((this.frames.frames[i].time || 0) - time);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = i;
+      }
+    }
+    return best;
+  }
+
+  updatePlaybackDisplay() {
+    const frameDisplay = document.getElementById('frameDisplay');
+    if (!frameDisplay) return;
+    const time = this.state.playheadTime;
+    const kfIndex = this.findNearestKeyframeToTime(time);
+    frameDisplay.textContent = `KF: ${kfIndex + 1} / ${this.frames.frames.length}  ${time.toFixed(2)}s`;
+  }
+
+  updateInterpolatedFrame() {
+    const time = this.state.playheadTime;
+    const keyframes = this.frames.frames;
+    if (keyframes.length === 0) return;
+
+    // Find surrounding keyframes based on time
+    let prevIndex = -1;
+    let nextIndex = -1;
+
+    for (let i = 0; i < keyframes.length; i++) {
+      const kfTime = keyframes[i].time || 0;
+      if (kfTime <= time) prevIndex = i;
+      if (kfTime >= time && nextIndex < 0) nextIndex = i;
+    }
+
+    if (prevIndex < 0) prevIndex = 0;
+    if (nextIndex < 0) nextIndex = keyframes.length - 1;
+
+    if (prevIndex === nextIndex) {
+      // Exactly at or near a keyframe
       this.state.interpolatedFrame = null;
-      this.frames.currentFrameIndex = currentIndex;
+      this.frames.currentFrameIndex = prevIndex;
       return;
     }
 
-    const startFrame = this.frames.frames[currentIndex];
-    const endFrame = this.frames.frames[nextIndex];
-    
-    // Apply easing to the interpolation factor
-    const easingFn = this.frames.constructor.easing[this.state.tweenEasing] || 
+    const prevKf = keyframes[prevIndex];
+    const nextKf = keyframes[nextIndex];
+    const prevTime = prevKf.time || 0;
+    const nextTime = nextKf.time || 0;
+
+    if (nextTime - prevTime < 0.001) {
+      this.state.interpolatedFrame = null;
+      this.frames.currentFrameIndex = prevIndex;
+      return;
+    }
+
+    const t = (time - prevTime) / (nextTime - prevTime);
+
+    // Use the per-keyframe easing from the prev keyframe
+    const easingName = prevKf.easing || 'linear';
+    const easingFn = this.frames.constructor.easing[easingName] ||
                      this.frames.constructor.easing.linear;
     const easedT = easingFn(t);
+    this.state.interpolatedFrame = this.frames.createInterpolatedFrame(prevKf, nextKf, easedT);
 
-    // Create interpolated frame
-    this.state.interpolatedFrame = this.frames.createInterpolatedFrame(startFrame, endFrame, easedT);
-    this.frames.currentFrameIndex = currentIndex;
+    this.frames.currentFrameIndex = prevIndex;
   }
 
   selectAll() {
