@@ -124,57 +124,54 @@
             <button class="timeline-btn" id="stopBtn" title="Stop">
               <svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12"/></svg>
             </button>
-            <button class="timeline-btn" id="prevFrameBtn" title="Previous Frame">
+            <button class="timeline-btn" id="prevFrameBtn" title="Previous Keyframe">
               <svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
             </button>
-            <button class="timeline-btn" id="nextFrameBtn" title="Next Frame">
+            <button class="timeline-btn" id="nextFrameBtn" title="Next Keyframe">
               <svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
             </button>
-            <span class="frame-display" id="frameDisplay">Frame: 1 / 1</span>
-            <button class="timeline-btn" id="addFrameBtn" title="Add Frame">
+            <span class="frame-display" id="frameDisplay">KF: 1 / 1  0.00s</span>
+            <div class="toolbar-divider-v"></div>
+            <button class="timeline-btn" id="addFrameBtn" title="Add Keyframe">
               <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
             </button>
-            <button class="timeline-btn" id="dupFrameBtn" title="Duplicate Frame">
+            <button class="timeline-btn" id="dupFrameBtn" title="Duplicate Keyframe">
               <svg viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>
             </button>
-            <button class="timeline-btn" id="delFrameBtn" title="Delete Frame">
+            <button class="timeline-btn" id="delFrameBtn" title="Delete Keyframe">
               <svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
             </button>
+            <div class="toolbar-divider-v"></div>
+            <label class="toolbar-label">
+              <input type="checkbox" id="onionSkinToggle" />
+              <span>Onion</span>
+            </label>
+
+            <div class="toolbar-divider-v"></div>
+            <label class="toolbar-label">
+              Speed:
+              <input type="number" id="playbackSpeed" value="1" min="0.1" max="5" step="0.1" style="width: 50px;" />x
+            </label>
+            <label class="toolbar-label">
+              Loop:
+              <select id="loopMode" style="width: 80px;">
+                <option value="loop" selected>Loop</option>
+                <option value="pingpong">Ping-Pong</option>
+                <option value="once">Once</option>
+              </select>
+            </label>
             <label class="toolbar-label">
               FPS:
               <input type="number" id="fpsInput" value="12" min="1" max="60" />
             </label>
-            <label class="toolbar-label">
-              <input type="checkbox" id="onionSkinToggle" />
-              <span>Onion Skin</span>
-            </label>
-            <div class="toolbar-divider-v"></div>
-            <label class="toolbar-label">
-              <input type="checkbox" id="tweenToggle" checked />
-              <span>Tween</span>
-            </label>
-            <label class="toolbar-label">
-              Steps:
-              <input type="number" id="tweenSteps" value="10" min="2" max="60" style="width: 50px;" title="Interpolation steps between keyframes" />
-            </label>
-            <label class="toolbar-label">
-              Easing:
-              <select id="tweenEasing" style="width: 100px;">
-                <option value="linear">Linear</option>
-                <option value="easeInQuad">Ease In</option>
-                <option value="easeOutQuad">Ease Out</option>
-                <option value="easeInOutQuad" selected>Ease In-Out</option>
-                <option value="easeInCubic">Ease In Cubic</option>
-                <option value="easeOutCubic">Ease Out Cubic</option>
-                <option value="easeInOutCubic">Ease In-Out Cubic</option>
-                <option value="easeInElastic">Elastic In</option>
-                <option value="easeOutElastic">Elastic Out</option>
-                <option value="easeOutBounce">Bounce</option>
-              </select>
-            </label>
           </div>
-          <div class="timeline-frames" id="timelineFrames">
-            <!-- Frames will be added here dynamically -->
+          <div class="timeline-track-area">
+            <div class="timeline-frames" id="timelineFrames">
+              <!-- Keyframe thumbnails -->
+            </div>
+            <div class="timeline-canvas-wrap" id="timelineCanvasContainer">
+              <!-- Canvas-based timeline inserted by TimelineUI -->
+            </div>
           </div>
         </div>
       </main>
