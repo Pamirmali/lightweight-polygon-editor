@@ -50,7 +50,12 @@ export class ExportManager {
   // Get data for all frames (animation)
   getAllFramesData() {
     return this.app.frames.frames.map((frame, index) => {
-      const frameData = { frameIndex: index, layers: [] };
+      const frameData = {
+        frameIndex: index,
+        time: frame.time || 0,
+        easing: frame.easing || 'linear',
+        layers: []
+      };
 
       for (const layer of frame.layers) {
         const layerData = {
@@ -123,6 +128,8 @@ export class ExportManager {
   exportAnimation() {
     const data = {
       fps: this.app.state.fps,
+      duration: this.app.state.timelineDuration,
+      loopMode: this.app.state.loopMode,
       frames: this.getAllFramesData()
     };
     const json = JSON.stringify(data, null, 2);

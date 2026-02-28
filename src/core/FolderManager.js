@@ -366,12 +366,14 @@ export class FolderManager {
 
   getProjectData() {
     return {
-      version: 1,
+      version: 2,
       type: 'animation',
       canvasWidth: this.app.canvasWidth,
       canvasHeight: this.app.canvasHeight,
       frames: this.app.frames.frames.map(frame => ({
         id: frame.id,
+        time: frame.time || 0,
+        easing: frame.easing || 'easeInOutQuad',
         layers: frame.layers.map(layer => ({
           id: layer.id,
           name: layer.name,
@@ -381,7 +383,10 @@ export class FolderManager {
         }))
       })),
       currentFrameIndex: this.app.frames.currentFrameIndex,
-      fps: this.app.state.fps
+      fps: this.app.state.fps,
+      timelineDuration: this.app.state.timelineDuration,
+      loopMode: this.app.state.loopMode,
+      playbackSpeed: this.app.state.playbackSpeed
     };
   }
 }
