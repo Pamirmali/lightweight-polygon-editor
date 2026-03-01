@@ -88,8 +88,13 @@ export class TimelineUI {
   }
 
   snapTime(time) {
-    // Snap to 0.05s increments
-    const snap = 0.05;
+    // Adaptive snap: finer increments at higher zoom levels
+    const zoom = this.state.timelineZoom;
+    let snap;
+    if (zoom >= 800) snap = 0.01;
+    else if (zoom >= 400) snap = 0.02;
+    else if (zoom >= 200) snap = 0.05;
+    else snap = 0.1;
     return Math.round(time / snap) * snap;
   }
 
