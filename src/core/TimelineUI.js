@@ -1,4 +1,13 @@
-// Interactive canvas-based Timeline UI for keyframe animation
+/**
+ * TimelineUI - Interactive canvas-based timeline for keyframe animation.
+ *
+ * Features:
+ *  - Zoomable/scrollable ruler with adaptive tick marks
+ *  - Draggable keyframe diamonds with snap-to-grid
+ *  - Clickable/hoverable transition segments for easing selection
+ *  - Playhead scrubbing and real-time position display
+ *  - Context-menu and double-click easing picker per transition
+ */
 export class TimelineUI {
   constructor(app) {
     this.app = app;
